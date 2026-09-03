@@ -1,0 +1,103 @@
+name: viacarraria
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-viacarraria}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - graph-infra
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - graph-infra
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-viacarraria}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-viacarraria}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, check_running]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - graph-infra
+
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.32.4
+    environment:
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      CLUSTER_HOSTNAME: node1
+      DEFAULT_VECTORIZER_MODULE: none
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      QUERY_DEFAULTS_LIMIT: "25"
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:50051:50051"
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    networks:
+      - graph-infra
+
+  directus:
+    image: directus/directus:11.11.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SECRET: ${DIRECTUS_SECRET:-replace-with-a-local-development-secret}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:-replace-with-a-local-development-password}
+      DB_CLIENT: pg
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_DATABASE: ${POSTGRES_DB:-viacarraria}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CACHE_ENABLED: "true"
+      CACHE_STORE: redis
+      REDIS: redis://redis:6379
+    ports:
+      - "127.0.0.1:8055:8055"
+    networks:
+      - graph-infra
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  redis-data:
+  weaviate-data:
+
+networks:
+  graph-infra:
+    name: graph_infra_net

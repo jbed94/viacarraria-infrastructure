@@ -1,0 +1,9 @@
+name: viacarraria-infrastructure
+channels:
+  - conda-forge
+dependencies:
+  - docker-cli=27
+  - docker-compose=2
+  - ca-certificates
+  - curl
+  - pre-commit=4

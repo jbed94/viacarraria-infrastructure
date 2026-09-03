@@ -1,0 +1,57 @@
+{{- if or .Values.parsingWorker.autoscaling.enabled .Values.embeddingEngine.autoscaling.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: {{ include "graph-app.fullname" . }}-runtime
+      key: RABBITMQ_URL
+---
+{{- end }}
+{{- if .Values.parsingWorker.autoscaling.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "graph-app.fullname" . }}-parsing-worker
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "graph-app.fullname" . }}-parsing-worker
+  minReplicaCount: {{ .Values.parsingWorker.autoscaling.minReplicaCount }}
+  maxReplicaCount: {{ .Values.parsingWorker.autoscaling.maxReplicaCount }}
+  triggers:
+    - type: rabbitmq
+      metadata:
+        queueName: document_parsing_queue
+        mode: QueueLength
+        value: "1"
+      authenticationRef:
+        name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
+{{- end }}
+---
+{{- if .Values.embeddingEngine.autoscaling.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "graph-app.fullname" . }}-embedding-engine
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "graph-app.fullname" . }}-embedding-engine
+  minReplicaCount: {{ .Values.embeddingEngine.autoscaling.minReplicaCount }}
+  maxReplicaCount: {{ .Values.embeddingEngine.autoscaling.maxReplicaCount }}
+  triggers:
+    - type: rabbitmq
+      metadata:
+        queueName: document_parsing_queue
+        mode: QueueLength
+        value: "1"
+      authenticationRef:
+        name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
+{{- end }}

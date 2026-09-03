@@ -1,0 +1,62 @@
+{{- if .Values.backend.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graph-app.fullname" . }}-backend
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: backend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: {{ include "graph-app.fullname" . }}-runtime
+          env:
+            - name: PORT
+              value: "3000"
+            - name: WEAVIATE_HTTP_URL
+              value: http://weaviate:8080
+            - name: TEI_URL
+              value: http://{{ include "graph-app.fullname" . }}-embedding-engine:80
+            - name: UPLOAD_DIR
+              value: /data/uploads
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+          readinessProbe:
+            httpGet: { path: /api/admin/health, port: 3000 }
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: {{ include "graph-app.fullname" . }}-uploads
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graph-app.fullname" . }}-backend
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.backend.service.type }}
+  selector:
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.backend.service.port }}
+      targetPort: 3000
+{{- end }}

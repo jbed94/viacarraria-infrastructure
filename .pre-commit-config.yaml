@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+        args: [--unsafe]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: local
+    hooks:
+      - id: compose-config
+        name: Validate Docker Compose configuration
+        entry: docker compose -f platforms/docker-compose/docker-compose.infra.yaml -f platforms/docker-compose/docker-compose.app.yaml config --quiet
+        language: system
+        files: ^platforms/docker-compose/
+        pass_filenames: false
+      - id: helm-lint
+        name: Lint Via Carraria Helm chart
+        entry: helm lint platforms/helm/graph-app
+        language: system
+        files: ^platforms/helm/graph-app/
+        pass_filenames: false

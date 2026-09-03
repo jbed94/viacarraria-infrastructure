@@ -1,0 +1,84 @@
+{{- if .Values.parsingWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graph-app.fullname" . }}-parsing-worker
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.parsingWorker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: parsing-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: parsing-worker
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: parsing-worker
+          image: "{{ .Values.parsingWorker.image.repository }}:{{ .Values.parsingWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: [python, -m, viacarraria_services.parsing_worker]
+          envFrom:
+            - secretRef:
+                name: {{ include "graph-app.fullname" . }}-runtime
+          env:
+            - name: BACKEND_API_URL
+              value: http://{{ include "graph-app.fullname" . }}-backend:3000/api
+            - name: WEAVIATE_HTTP_URL
+              value: http://weaviate:8080
+            - name: TEI_URL
+              value: http://{{ include "graph-app.fullname" . }}-embedding-engine:80
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: {{ include "graph-app.fullname" . }}-uploads
+{{- end }}
+---
+{{- if .Values.embeddingEngine.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graph-app.fullname" . }}-embedding-engine
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.embeddingEngine.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: embedding-engine
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: embedding-engine
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: embedding-engine
+          image: "{{ .Values.embeddingEngine.image.repository }}:{{ .Values.embeddingEngine.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: [--model-id, sentence-transformers/all-MiniLM-L6-v2, --port, "80"]
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graph-app.fullname" . }}-embedding-engine
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/component: embedding-engine
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: 80
+      targetPort: 80
+{{- end }}

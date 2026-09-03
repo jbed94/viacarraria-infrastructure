@@ -1,0 +1,160 @@
+name: viacarraria
+
+services:
+  database-migrate:
+    build:
+      context: ../../../viacarraria-database
+      dockerfile: platforms/docker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-viacarraria}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - graph-infra
+
+  web:
+    build:
+      context: ../../../viacarraria-frontend
+      dockerfile: platforms/docker/Dockerfile
+    ports:
+      - "4173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - graph-infra
+
+  api:
+    build:
+      context: ../../../viacarraria-backend
+      dockerfile: platforms/docker/Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-viacarraria}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-viacarraria}:${RABBITMQ_PASSWORD:-viacarraria}@rabbitmq:5672
+      WEAVIATE_HTTP_URL: http://weaviate:8080
+      WEAVIATE_GRPC_HOST: weaviate
+      WEAVIATE_GRPC_PORT: "50051"
+      TEI_URL: http://embedding-engine:80
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-development-better-auth-secret-change-me-32-chars}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-worker-token-change-me}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4173}
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads-data:/data/uploads
+    depends_on:
+      database-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      weaviate:
+        condition: service_started
+    healthcheck:
+      test: [CMD-SHELL, "node -e \"fetch('http://localhost:3000/api/admin/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - graph-infra
+
+  parsing-worker:
+    build:
+      context: ../../../viacarraria-services
+      dockerfile: platforms/docker/parsing-worker.Dockerfile
+    command: [python, -m, viacarraria_services.parsing_worker]
+    environment:
+      BACKEND_API_URL: http://api:3000/api
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-viacarraria}:${RABBITMQ_PASSWORD:-viacarraria}@rabbitmq:5672
+      WEAVIATE_HTTP_URL: http://weaviate:8080
+      WEAVIATE_GRPC_HOST: weaviate
+      WEAVIATE_GRPC_PORT: "50051"
+      TEI_URL: http://embedding-engine:80
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-worker-token-change-me}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads-data:/data/uploads
+    depends_on:
+      api:
+        condition: service_healthy
+      embedding-engine:
+        condition: service_started
+    networks:
+      - graph-infra
+
+  embedding-engine:
+    build:
+      context: ../../../viacarraria-services
+      dockerfile: platforms/docker/embedding-engine.Dockerfile
+    command: [--model-id, "${TEI_MODEL_ID:-sentence-transformers/all-MiniLM-L6-v2}", --port, "80"]
+    ports:
+      - "8081:80"
+    networks:
+      - graph-infra
+
+  api-test:
+    build:
+      context: ../../../viacarraria-backend
+      dockerfile: platforms/docker/Dockerfile
+      target: build
+    command: [pnpm, test, --runInBand]
+    profiles: [test]
+    networks:
+      - graph-infra
+
+  api-e2e:
+    build:
+      context: ../../../viacarraria-backend
+      dockerfile: platforms/docker/Dockerfile
+      target: build
+    command: [pnpm, test:e2e, --runInBand]
+    environment:
+      E2E_API_URL: http://api:3000/api
+    depends_on:
+      api:
+        condition: service_healthy
+      parsing-worker:
+        condition: service_started
+    profiles: [test]
+    networks:
+      - graph-infra
+
+  web-test:
+    build:
+      context: ../../../viacarraria-frontend
+      dockerfile: platforms/docker/Dockerfile
+      target: build
+    command: [pnpm, test]
+    profiles: [test]
+    networks:
+      - graph-infra
+
+  worker-test:
+    build:
+      context: ../../../viacarraria-services
+      dockerfile: platforms/docker/parsing-worker.Dockerfile
+      args:
+        INSTALL_DEV: "true"
+    command: [python, -m, pytest, tests]
+    profiles: [test]
+    networks:
+      - graph-infra
+
+volumes:
+  uploads-data:
+
+networks:
+  graph-infra:
+    name: graph_infra_net

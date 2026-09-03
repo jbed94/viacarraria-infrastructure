@@ -1,0 +1,65 @@
+global:
+  imagePullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+secrets:
+  create: true
+  databaseUrl: postgresql://postgres:change-me@postgres:5432/viacarraria
+  redisUrl: redis://redis:6379
+  rabbitMqUrl: amqp://guest:guest@rabbitmq:5672
+  betterAuthUrl: https://api.example.com
+  betterAuthSecret: change-me-with-a-random-32-character-secret
+  frontendOrigin: https://app.example.com
+  googleClientId: ""
+  googleClientSecret: ""
+  internalServiceToken: change-me
+  upstashRedisRestUrl: ""
+  upstashRedisRestToken: ""
+
+uploads:
+  storageClass: ""
+  size: 10Gi
+
+frontend:
+  enabled: true
+  image:
+    repository: viacarraria/frontend
+    tag: latest
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 80
+
+backend:
+  enabled: true
+  image:
+    repository: viacarraria/backend
+    tag: latest
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 3000
+
+parsingWorker:
+  enabled: true
+  image:
+    repository: viacarraria/parsing-worker
+    tag: latest
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 10
+
+embeddingEngine:
+  enabled: true
+  image:
+    repository: viacarraria/embedding-engine
+    tag: latest
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 3

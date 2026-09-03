@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "graph-app.fullname" . }}-uploads
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: {{ .Values.uploads.size }}
+  {{- with .Values.uploads.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+{{- if .Values.secrets.create }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "graph-app.fullname" . }}-runtime
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  DATABASE_URL: {{ required "secrets.databaseUrl is required" .Values.secrets.databaseUrl | quote }}
+  REDIS_URL: {{ required "secrets.redisUrl is required" .Values.secrets.redisUrl | quote }}
+  RABBITMQ_URL: {{ required "secrets.rabbitMqUrl is required" .Values.secrets.rabbitMqUrl | quote }}
+  BETTER_AUTH_URL: {{ required "secrets.betterAuthUrl is required" .Values.secrets.betterAuthUrl | quote }}
+  BETTER_AUTH_SECRET: {{ required "secrets.betterAuthSecret is required" .Values.secrets.betterAuthSecret | quote }}
+  FRONTEND_ORIGIN: {{ required "secrets.frontendOrigin is required" .Values.secrets.frontendOrigin | quote }}
+  GOOGLE_CLIENT_ID: {{ .Values.secrets.googleClientId | quote }}
+  GOOGLE_CLIENT_SECRET: {{ .Values.secrets.googleClientSecret | quote }}
+  INTERNAL_SERVICE_TOKEN: {{ required "secrets.internalServiceToken is required" .Values.secrets.internalServiceToken | quote }}
+  UPSTASH_REDIS_REST_URL: {{ .Values.secrets.upstashRedisRestUrl | quote }}
+  UPSTASH_REDIS_REST_TOKEN: {{ .Values.secrets.upstashRedisRestToken | quote }}
+{{- end }}
