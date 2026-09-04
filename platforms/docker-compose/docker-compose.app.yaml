@@ -39,6 +39,7 @@ services:
       WEAVIATE_GRPC_HOST: weaviate
       WEAVIATE_GRPC_PORT: "50051"
       TEI_URL: http://embedding-engine:80
+      TEI_RERANK_URL: ${TEI_RERANK_URL:-http://reranking-engine:80}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-development-better-auth-secret-change-me-32-chars}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
@@ -116,6 +117,16 @@ services:
     command: [--model-id, "${TEI_MODEL_ID:-sentence-transformers/all-MiniLM-L6-v2}", --port, "80"]
     ports:
       - "8081:80"
+    networks:
+      - graph-infra
+
+  reranking-engine:
+    build:
+      context: ../../../viacarraria-services
+      dockerfile: platforms/docker/embedding-engine.Dockerfile
+    command: [--model-id, "${TEI_RERANK_MODEL_ID:-BAAI/bge-reranker-base}", --port, "80"]
+    ports:
+      - "8082:80"
     networks:
       - graph-infra
 

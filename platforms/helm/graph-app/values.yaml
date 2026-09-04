@@ -74,3 +74,14 @@ embeddingEngine:
     enabled: true
     minReplicaCount: 0
     maxReplicaCount: 3
+
+rerankingEngine:
+  enabled: true
+  image:
+    repository: viacarraria/embedding-engine
+    tag: latest
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 3

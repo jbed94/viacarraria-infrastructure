@@ -33,6 +33,8 @@ spec:
               value: http://weaviate:8080
             - name: TEI_URL
               value: http://{{ include "graph-app.fullname" . }}-embedding-engine:80
+            - name: TEI_RERANK_URL
+              value: http://{{ include "graph-app.fullname" . }}-reranking-engine:80
             - name: UPLOAD_DIR
               value: /data/uploads
           volumeMounts:

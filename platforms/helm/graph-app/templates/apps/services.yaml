@@ -82,3 +82,45 @@ spec:
     - port: 80
       targetPort: 80
 {{- end }}
+---
+{{- if .Values.rerankingEngine.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graph-app.fullname" . }}-reranking-engine
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.rerankingEngine.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: reranking-engine
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: reranking-engine
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: reranking-engine
+          image: "{{ .Values.rerankingEngine.image.repository }}:{{ .Values.rerankingEngine.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: [--model-id, BAAI/bge-reranker-base, --port, "80"]
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graph-app.fullname" . }}-reranking-engine
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/component: reranking-engine
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: 80
+      targetPort: 80
+{{- end }}
