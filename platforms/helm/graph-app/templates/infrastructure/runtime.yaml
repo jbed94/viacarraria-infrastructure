@@ -33,4 +33,11 @@ stringData:
   INTERNAL_SERVICE_TOKEN: {{ required "secrets.internalServiceToken is required" .Values.secrets.internalServiceToken | quote }}
   UPSTASH_REDIS_REST_URL: {{ .Values.secrets.upstashRedisRestUrl | quote }}
   UPSTASH_REDIS_REST_TOKEN: {{ .Values.secrets.upstashRedisRestToken | quote }}
+  STORAGE_DRIVER: {{ .Values.storage.driver | default "s3" | quote }}
+  S3_ENDPOINT: {{ .Values.storage.s3.endpoint | default "" | quote }}
+  S3_REGION: {{ .Values.storage.s3.region | default "us-east-1" | quote }}
+  S3_BUCKET: {{ .Values.storage.s3.bucket | default "viacarraria-sources" | quote }}
+  S3_ACCESS_KEY: {{ .Values.storage.s3.accessKey | default "" | quote }}
+  S3_SECRET_KEY: {{ .Values.storage.s3.secretKey | default "" | quote }}
+  S3_FORCE_PATH_STYLE: {{ .Values.storage.s3.forcePathStyle | default "true" | quote }}
 {{- end }}
