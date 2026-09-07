@@ -39,6 +39,11 @@ mamba run -n viacarraria-infrastructure docker compose \
 ```
 
 Compose runs PostgreSQL, Redis, RabbitMQ, Weaviate, Directus, the migration/seed
-job, API, TEI, worker, and web client. The Helm chart deploys the API/client,
-worker/TEI services, shared upload storage, and KEDA queue scalers; production
-secrets and image references are supplied through chart values.
+job, API, TEI, worker, and web client.
+
+The Helm umbrella chart in `platforms/helm/graph-app` provides complete infrastructure and application orchestration with two tailored profiles:
+- `values-minikube.yaml`: Self-contained local Minikube deployment with in-cluster Postgres, Redis, RabbitMQ, Weaviate, MinIO, and ingress.
+- `values-production.yaml`: High-availability Google Cloud Platform (GKE) deployment with cert-manager automated Let's Encrypt SSL, HPA & KEDA scale-to-zero autoscaling, zero-trust network policies, and custom domain ingress.
+
+For the comprehensive deployment guide and external setup walkthrough (domain purchase, DNS records, SSL certificates, transactional email, and GKE provisioning), consult [platforms/helm/README.md](platforms/helm/README.md).
+

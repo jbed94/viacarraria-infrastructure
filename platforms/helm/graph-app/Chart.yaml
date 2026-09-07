@@ -4,3 +4,9 @@ description: Via Carraria application and supporting platform services
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+
+dependencies:
+  - name: tailscale-operator
+    version: "1.78.1"
+    repository: "https://pkgs.tailscale.com/helmcharts"
+    condition: tailscale-operator.enabled

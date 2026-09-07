@@ -1,0 +1,46 @@
+{{- if .Values.databaseMigrate.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "graph-app.fullname" . }}-migrate
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-migrate
+  annotations:
+    "helm.sh/hook": post-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "1"
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: database-migrate
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.databaseMigrate.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.databaseMigrate.image.repository }}:{{ .Values.databaseMigrate.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              echo "Executing database migrations..."
+              pnpm migrate:deploy
+              {{- if .Values.databaseMigrate.seed }}
+              echo "Seeding database..."
+              pnpm seed
+              {{- end }}
+              echo "Database migration complete."
+          envFrom:
+            - secretRef:
+                name: {{ include "graph-app.fullname" . }}-runtime
+          resources:
+            {{- toYaml .Values.databaseMigrate.resources | nindent 12 }}
+{{- end }}

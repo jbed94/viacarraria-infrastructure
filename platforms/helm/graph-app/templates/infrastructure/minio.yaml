@@ -1,0 +1,140 @@
+{{- if .Values.minio.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graph-app.fullname" . }}-minio
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: minio
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: minio
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: minio
+          image: "{{ .Values.minio.image.repository }}:{{ .Values.minio.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -c
+            - minio server /data --console-address ":9001"
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              value: {{ .Values.minio.auth.rootUser | quote }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ .Values.minio.auth.rootPassword | quote }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "graph-app.fullname" . }}-minio
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "graph-app.fullname" . }}-minio
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.minio.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.minio.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graph-app.fullname" . }}-minio
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: minio
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: 9000
+      targetPort: s3
+      name: s3
+    - port: 9001
+      targetPort: console
+      name: console
+---
+{{- if .Values.minio.createBuckets }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "graph-app.fullname" . }}-minio-create-bucket
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio-provisioner
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: minio-provisioner
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2024-08-03T07-06-04Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until mc alias set local http://{{ include "graph-app.fullname" . }}-minio:9000 {{ .Values.minio.auth.rootUser }} {{ .Values.minio.auth.rootPassword }}; do
+                echo "Waiting for MinIO server..."
+                sleep 2
+              done
+              mc mb --ignore-existing local/{{ .Values.storage.s3.bucket }}
+              {{- if .Values.minio.upstreamTier }}
+              {{- if .Values.minio.upstreamTier.enabled }}
+              {{- if eq .Values.minio.upstreamTier.provider "s3" }}
+              mc ilm tier add s3 local UPSTREAM_S3 --endpoint {{ .Values.minio.upstreamTier.s3.endpoint | quote }} --access-key {{ .Values.minio.upstreamTier.s3.accessKey | quote }} --secret-key {{ .Values.minio.upstreamTier.s3.secretKey | quote }} --bucket {{ .Values.minio.upstreamTier.s3.bucket | quote }} --region {{ .Values.minio.upstreamTier.s3.region | default "us-east-1" | quote }} || true
+              mc ilm rule add --tier UPSTREAM_S3 --transition-days 0 local/{{ .Values.storage.s3.bucket }} || true
+              {{- else if eq .Values.minio.upstreamTier.provider "gcs" }}
+              mc ilm tier add gcs local UPSTREAM_GCS --credentials-file {{ .Values.minio.upstreamTier.gcs.credentialsFile | quote }} --bucket {{ .Values.minio.upstreamTier.gcs.bucket | quote }} || true
+              mc ilm rule add --tier UPSTREAM_GCS --transition-days 0 local/{{ .Values.storage.s3.bucket }} || true
+              {{- end }}
+              {{- end }}
+              {{- end }}
+              mc ilm rule add --abort-incomplete-multipart-days {{ (((.Values.storage).s3).lifecycle).abortIncompleteMultipartDays | default 1 }} local/{{ .Values.storage.s3.bucket }} || true
+              echo "Bucket {{ .Values.storage.s3.bucket }} created and lifecycle rules configured successfully."
+{{- end }}
+{{- end }}

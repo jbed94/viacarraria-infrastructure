@@ -1,0 +1,18 @@
+{{- if and .Values.ingress.certManager.enabled .Values.ingress.certManager.createClusterIssuer }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.ingress.certManager.clusterIssuer | quote }}
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  acme:
+    server: {{ .Values.ingress.certManager.acmeServer | default "https://acme-v02.api.letsencrypt.org/directory" | quote }}
+    email: {{ required "ingress.certManager.email is required when createClusterIssuer is true" .Values.ingress.certManager.email | quote }}
+    privateKeySecretRef:
+      name: {{ printf "%s-acme-account-key" .Values.ingress.certManager.clusterIssuer | quote }}
+    solvers:
+      - http01:
+          ingress:
+            class: {{ .Values.ingress.className | default "nginx" | quote }}
+{{- end }}

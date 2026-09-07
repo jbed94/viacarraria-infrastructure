@@ -6,7 +6,7 @@ services:
       context: ../../../viacarraria-database
       dockerfile: platforms/docker/Dockerfile
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-viacarraria}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy
@@ -25,26 +25,46 @@ services:
     networks:
       - graph-infra
 
+  admin-web:
+    build:
+      context: ../../../viacarraria-frontend
+      dockerfile: platforms/docker/Dockerfile.admin
+    ports:
+      # Bound strictly to loopback (127.0.0.1) or internal VPN interface to prevent public internet exposure
+      - "127.0.0.1:4174:80"
+    environment:
+      VITE_API_URL: http://localhost:3000/api
+      VITE_PUBLIC_WEB_URL: http://localhost:4173
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - graph-infra
+
   api:
     build:
       context: ../../../viacarraria-backend
       dockerfile: platforms/docker/Dockerfile
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: "3000"
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-viacarraria}
-      REDIS_URL: redis://redis:6379
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-viacarraria}:${RABBITMQ_PASSWORD:-viacarraria}@rabbitmq:5672
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
       WEAVIATE_HTTP_URL: http://weaviate:8080
       WEAVIATE_GRPC_HOST: weaviate
       WEAVIATE_GRPC_PORT: "50051"
+      WEAVIATE_PQ_ENABLED: ${WEAVIATE_PQ_ENABLED:-false}
+      WEAVIATE_PQ_TRAINING_LIMIT: ${WEAVIATE_PQ_TRAINING_LIMIT:-10000}
+      WEAVIATE_PQ_SEGMENTS: ${WEAVIATE_PQ_SEGMENTS:-64}
       TEI_URL: http://embedding-engine:80
       TEI_RERANK_URL: ${TEI_RERANK_URL:-http://reranking-engine:80}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-local-development-better-auth-secret-change-me-32-chars}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      ADMIN_KEY: ${ADMIN_KEY:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-worker-token-change-me}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:4173}
       UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
       UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
@@ -52,8 +72,8 @@ services:
       STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
       S3_REGION: ${S3_REGION:-us-east-1}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:-viacarraria-sources}
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
       S3_PUBLIC_URL: ${S3_PUBLIC_URL:-http://localhost:9000}
@@ -85,19 +105,22 @@ services:
     command: [python, -m, viacarraria_services.parsing_worker]
     environment:
       BACKEND_API_URL: http://api:3000/api
-      REDIS_URL: redis://redis:6379
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-viacarraria}:${RABBITMQ_PASSWORD:-viacarraria}@rabbitmq:5672
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
       WEAVIATE_HTTP_URL: http://weaviate:8080
       WEAVIATE_GRPC_HOST: weaviate
       WEAVIATE_GRPC_PORT: "50051"
+      WEAVIATE_PQ_ENABLED: ${WEAVIATE_PQ_ENABLED:-false}
+      WEAVIATE_PQ_TRAINING_LIMIT: ${WEAVIATE_PQ_TRAINING_LIMIT:-10000}
+      WEAVIATE_PQ_SEGMENTS: ${WEAVIATE_PQ_SEGMENTS:-64}
       TEI_URL: http://embedding-engine:80
-      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-development-worker-token-change-me}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       UPLOAD_DIR: /data/uploads
       STORAGE_DRIVER: ${STORAGE_DRIVER:-s3}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
       S3_REGION: ${S3_REGION:-us-east-1}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:-viacarraria-sources}
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
     volumes:
@@ -116,7 +139,7 @@ services:
       dockerfile: platforms/docker/embedding-engine.Dockerfile
     command: [--model-id, "${TEI_MODEL_ID:-sentence-transformers/all-MiniLM-L6-v2}", --port, "80"]
     ports:
-      - "8081:80"
+      - "127.0.0.1:8081:80"
     networks:
       - graph-infra
 
@@ -126,7 +149,7 @@ services:
       dockerfile: platforms/docker/embedding-engine.Dockerfile
     command: [--model-id, "${TEI_RERANK_MODEL_ID:-BAAI/bge-reranker-base}", --port, "80"]
     ports:
-      - "8082:80"
+      - "127.0.0.1:8082:80"
     networks:
       - graph-infra
 

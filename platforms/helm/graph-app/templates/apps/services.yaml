@@ -5,8 +5,11 @@ metadata:
   name: {{ include "graph-app.fullname" . }}-parsing-worker
   labels:
     {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: parsing-worker
 spec:
+  {{- if not .Values.parsingWorker.autoscaling.enabled }}
   replicas: {{ .Values.parsingWorker.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: parsing-worker
@@ -17,28 +20,55 @@ spec:
         app.kubernetes.io/component: parsing-worker
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "graph-app.fullname" . }}-app
+      {{- end }}
+      {{- with .Values.parsingWorker.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.parsingWorker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.parsingWorker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.parsingWorker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: parsing-worker
           image: "{{ .Values.parsingWorker.image.repository }}:{{ .Values.parsingWorker.image.tag }}"
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           command: [python, -m, viacarraria_services.parsing_worker]
+          {{- with .Values.parsingWorker.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           envFrom:
             - secretRef:
                 name: {{ include "graph-app.fullname" . }}-runtime
           env:
             - name: BACKEND_API_URL
               value: http://{{ include "graph-app.fullname" . }}-backend:3000/api
-            - name: WEAVIATE_HTTP_URL
-              value: http://weaviate:8080
             - name: TEI_URL
               value: http://{{ include "graph-app.fullname" . }}-embedding-engine:80
+          {{- if or .Values.uploads.enabled (eq .Values.storage.driver "local") }}
           volumeMounts:
             - name: uploads
               mountPath: /data/uploads
+          {{- end }}
+          resources:
+            {{- toYaml .Values.parsingWorker.resources | nindent 12 }}
+      {{- if or .Values.uploads.enabled (eq .Values.storage.driver "local") }}
       volumes:
         - name: uploads
           persistentVolumeClaim:
             claimName: {{ include "graph-app.fullname" . }}-uploads
+      {{- end }}
 {{- end }}
 ---
 {{- if .Values.embeddingEngine.enabled }}
@@ -48,8 +78,11 @@ metadata:
   name: {{ include "graph-app.fullname" . }}-embedding-engine
   labels:
     {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embedding-engine
 spec:
+  {{- if not .Values.embeddingEngine.autoscaling.enabled }}
   replicas: {{ .Values.embeddingEngine.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: embedding-engine
@@ -60,13 +93,57 @@ spec:
         app.kubernetes.io/component: embedding-engine
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "graph-app.fullname" . }}-app
+      {{- end }}
+      {{- with .Values.embeddingEngine.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.embeddingEngine.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.embeddingEngine.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.embeddingEngine.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: embedding-engine
           image: "{{ .Values.embeddingEngine.image.repository }}:{{ .Values.embeddingEngine.image.tag }}"
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          args: [--model-id, sentence-transformers/all-MiniLM-L6-v2, --port, "80"]
+          {{- with .Values.embeddingEngine.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          args:
+            - --model-id
+            - {{ .Values.embeddingEngine.modelId | default "sentence-transformers/all-MiniLM-L6-v2" | quote }}
+            - --port
+            - "80"
           ports:
-            - containerPort: 80
+            - name: http
+              containerPort: 80
+          resources:
+            {{- toYaml .Values.embeddingEngine.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
 ---
 apiVersion: v1
 kind: Service
@@ -74,13 +151,16 @@ metadata:
   name: {{ include "graph-app.fullname" . }}-embedding-engine
   labels:
     {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embedding-engine
 spec:
+  type: ClusterIP
   selector:
     app.kubernetes.io/component: embedding-engine
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
     - port: 80
-      targetPort: 80
+      targetPort: http
+      name: http
 {{- end }}
 ---
 {{- if .Values.rerankingEngine.enabled }}
@@ -90,8 +170,11 @@ metadata:
   name: {{ include "graph-app.fullname" . }}-reranking-engine
   labels:
     {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reranking-engine
 spec:
+  {{- if not .Values.rerankingEngine.autoscaling.enabled }}
   replicas: {{ .Values.rerankingEngine.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: reranking-engine
@@ -102,13 +185,57 @@ spec:
         app.kubernetes.io/component: reranking-engine
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "graph-app.fullname" . }}-app
+      {{- end }}
+      {{- with .Values.rerankingEngine.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.rerankingEngine.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.rerankingEngine.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.rerankingEngine.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: reranking-engine
           image: "{{ .Values.rerankingEngine.image.repository }}:{{ .Values.rerankingEngine.image.tag }}"
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          args: [--model-id, BAAI/bge-reranker-base, --port, "80"]
+          {{- with .Values.rerankingEngine.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          args:
+            - --model-id
+            - {{ .Values.rerankingEngine.modelId | default "BAAI/bge-reranker-base" | quote }}
+            - --port
+            - "80"
           ports:
-            - containerPort: 80
+            - name: http
+              containerPort: 80
+          resources:
+            {{- toYaml .Values.rerankingEngine.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
 ---
 apiVersion: v1
 kind: Service
@@ -116,11 +243,14 @@ metadata:
   name: {{ include "graph-app.fullname" . }}-reranking-engine
   labels:
     {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reranking-engine
 spec:
+  type: ClusterIP
   selector:
     app.kubernetes.io/component: reranking-engine
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
     - port: 80
-      targetPort: 80
+      targetPort: http
+      name: http
 {{- end }}

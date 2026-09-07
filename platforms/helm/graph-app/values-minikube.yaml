@@ -1,0 +1,257 @@
+################################################################################
+# Via Carraria Helm Values - Local Minikube Profile
+#
+# Optimized for self-contained execution inside a local Minikube cluster:
+# - In-cluster PostgreSQL, Redis, RabbitMQ, Weaviate, and MinIO enabled
+# - Ingress configured for Minikube NGINX addon (minikube addons enable ingress)
+# - Host resolution via 'viacarraria.local'
+# - Downscaled CPU/RAM requests to run efficiently within 8GB RAM
+# - Database migrations automatically deploy and seed demonstration graphs
+################################################################################
+
+global:
+  imagePullPolicy: IfNotPresent
+
+secrets:
+  create: true
+  databaseUrl: "postgresql://postgres:minikubepassword@viacarraria-graph-app-postgresql:5432/viacarraria"
+  redisUrl: "redis://:minikubepassword@viacarraria-graph-app-redis:6379"
+  rabbitMqUrl: "amqp://rabbitmq:minikubepassword@viacarraria-graph-app-rabbitmq:5672"
+  betterAuthUrl: "http://viacarraria.local/api"
+  betterAuthSecret: "local-minikube-auth-secret-32-chars-long-rnd!"
+  frontendOrigin: "http://viacarraria.local"
+  internalServiceToken: "local-internal-token-for-services-auth"
+
+uploads:
+  enabled: true
+  storageClass: "standard"
+  size: 2Gi
+
+storage:
+  driver: s3
+  s3:
+    endpoint: "http://viacarraria-graph-app-minio:9000"
+    region: "us-east-1"
+    bucket: "viacarraria-sources"
+    accessKey: "minioadmin"
+    secretKey: "minikubepassword"
+    forcePathStyle: "true"
+    publicUrl: "http://viacarraria.local/minio"
+    lifecycle:
+      abortIncompleteMultipartDays: 1
+      transitionIaDays: 0
+      transitionGlacierDays: 0
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "32m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  certManager:
+    enabled: false
+  tls:
+    enabled: false
+  hosts:
+    - host: viacarraria.local
+      paths:
+        - path: /api
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /socket.io
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /
+          pathType: Prefix
+          serviceName: frontend
+          servicePort: 80
+
+networkPolicy:
+  enabled: false
+
+frontend:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  hpa:
+    enabled: false
+  pdb:
+    enabled: false
+
+backend:
+  enabled: true
+  replicaCount: 1
+  env:
+    nodeEnv: development
+  resources:
+    requests:
+      cpu: 150m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 768Mi
+  hpa:
+    enabled: false
+  pdb:
+    enabled: false
+
+parsingWorker:
+  enabled: true
+  replicaCount: 1
+  autoscaling:
+    enabled: false # Keep 1 pod running in Minikube without requiring KEDA operator
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1536Mi
+
+embeddingEngine:
+  enabled: true
+  replicaCount: 1
+  autoscaling:
+    enabled: false # Keep 1 pod running in Minikube without requiring KEDA operator
+  resources:
+    requests:
+      cpu: 300m
+      memory: 512Mi
+    limits:
+      cpu: 1500m
+      memory: 2048Mi
+
+rerankingEngine:
+  enabled: true
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  resources:
+    requests:
+      cpu: 300m
+      memory: 512Mi
+    limits:
+      cpu: 1500m
+      memory: 2048Mi
+
+databaseMigrate:
+  enabled: true
+  seed: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Self-Hosted In-Cluster Infrastructure for Minikube
+postgresql:
+  enabled: true
+  auth:
+    database: viacarraria
+    username: postgres
+    password: "minikubepassword"
+  persistence:
+    storageClass: "standard"
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+redis:
+  enabled: true
+  auth:
+    password: "minikubepassword"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+rabbitmq:
+  enabled: true
+  auth:
+    username: rabbitmq
+    password: "minikubepassword"
+  persistence:
+    storageClass: "standard"
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+weaviate:
+  enabled: true
+  anonymousAccess: "true"
+  productQuantization:
+    enabled: false
+  persistence:
+    storageClass: "standard"
+    size: 4Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1536Mi
+
+minio:
+  enabled: true
+  auth:
+    rootUser: "minioadmin"
+    rootPassword: "minikubepassword"
+  persistence:
+    storageClass: "standard"
+    size: 4Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  createBuckets: true
+
+# Inactive Graph & Resource Retention Policies
+retention:
+  inactivityDays: 90
+  gracePeriodDays: 7
+  scheduleIntervalHours: 24
+  autoPurgeEnabled: true
+  cronJob:
+    enabled: false
+    schedule: "0 3 * * *"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 1
+    failedJobsHistoryLimit: 1
+    image:
+      repository: curlimages/curl
+      tag: "8.12.1"
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+

@@ -1,0 +1,158 @@
+{{- if .Values.admin.enabled }}
+{{- if and .Values.admin.tailscale.enabled .Values.admin.tailscale.authKey }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "graph-app.fullname" . }}-tailscale-auth
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+type: Opaque
+stringData:
+  TS_AUTHKEY: {{ .Values.admin.tailscale.authKey | quote }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graph-app.fullname" . }}-admin
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+spec:
+  replicas: {{ .Values.admin.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: admin
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: admin
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "graph-app.fullname" . }}-app
+      {{- end }}
+      {{- with .Values.admin.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.admin.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.admin.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.admin.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: admin
+          image: "{{ .Values.admin.image.repository }}:{{ .Values.admin.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          {{- with .Values.admin.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 80
+          resources:
+            {{- toYaml .Values.admin.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /admin.html
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /admin.html
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+        {{- if and .Values.admin.tailscale.enabled .Values.admin.tailscale.sidecar.enabled }}
+        - name: tailscale
+          image: "{{ .Values.admin.tailscale.sidecar.image.repository }}:{{ .Values.admin.tailscale.sidecar.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: TS_KUBE_SECRET
+              value: {{ printf "%s-tailscale-state" (include "graph-app.fullname" .) | quote }}
+            - name: TS_USERSPACE
+              value: {{ .Values.admin.tailscale.sidecar.userspace | default true | quote }}
+            - name: TS_HOSTNAME
+              value: {{ .Values.admin.tailscale.hostname | default "viacarraria-admin" | quote }}
+            - name: TS_DEST_IP
+              value: "127.0.0.1"
+            - name: TS_EXTRA_ARGS
+              value: {{ printf "--advertise-tags=%s" (.Values.admin.tailscale.tags | default "tag:k8s") | quote }}
+            - name: TS_AUTHKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.admin.tailscale.authKeySecret | default (printf "%s-tailscale-auth" (include "graph-app.fullname" .)) }}
+                  key: {{ .Values.admin.tailscale.authKeySecretKey | default "TS_AUTHKEY" }}
+                  optional: true
+          {{- if not .Values.admin.tailscale.sidecar.userspace }}
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          {{- end }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graph-app.fullname" . }}-admin
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+  {{- if and .Values.admin.tailscale.enabled .Values.admin.tailscale.service.enabled }}
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: {{ .Values.admin.tailscale.hostname | default "viacarraria-admin" | quote }}
+    {{- if .Values.admin.tailscale.tags }}
+    tailscale.com/tags: {{ .Values.admin.tailscale.tags | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  type: {{ .Values.admin.service.type | default "ClusterIP" }}
+  selector:
+    app.kubernetes.io/component: admin
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.admin.service.port | default 80 }}
+      targetPort: http
+      name: http
+{{- if and .Values.admin.tailscale.enabled .Values.admin.tailscale.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "graph-app.fullname" . }}-admin-tailscale
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+  annotations:
+    tailscale.com/tags: {{ .Values.admin.tailscale.tags | default "tag:k8s" | quote }}
+spec:
+  ingressClassName: {{ .Values.admin.tailscale.ingress.className | default "tailscale" | quote }}
+  rules:
+    - host: {{ .Values.admin.tailscale.hostname | default "viacarraria-admin" | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "graph-app.fullname" . }}-admin
+                port:
+                  number: {{ .Values.admin.service.port | default 80 }}
+{{- end }}
+{{- end }}

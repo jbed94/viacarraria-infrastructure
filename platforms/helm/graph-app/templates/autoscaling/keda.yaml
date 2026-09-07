@@ -22,18 +22,20 @@ metadata:
 spec:
   scaleTargetRef:
     name: {{ include "graph-app.fullname" . }}-parsing-worker
-  minReplicaCount: {{ .Values.parsingWorker.autoscaling.minReplicaCount }}
-  maxReplicaCount: {{ .Values.parsingWorker.autoscaling.maxReplicaCount }}
+  minReplicaCount: {{ .Values.parsingWorker.autoscaling.minReplicaCount | default 0 }}
+  maxReplicaCount: {{ .Values.parsingWorker.autoscaling.maxReplicaCount | default 10 }}
+  pollingInterval: {{ .Values.parsingWorker.autoscaling.pollingInterval | default 15 }}
+  cooldownPeriod: {{ .Values.parsingWorker.autoscaling.cooldownPeriod | default 60 }}
   triggers:
     - type: rabbitmq
       metadata:
-        queueName: document_parsing_queue
+        queueName: {{ .Values.parsingWorker.autoscaling.queueName | default "document_parsing_queue" | quote }}
         mode: QueueLength
-        value: "1"
+        value: {{ .Values.parsingWorker.autoscaling.queueLength | default "1" | quote }}
       authenticationRef:
         name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
-{{- end }}
 ---
+{{- end }}
 {{- if .Values.embeddingEngine.autoscaling.enabled }}
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -44,14 +46,16 @@ metadata:
 spec:
   scaleTargetRef:
     name: {{ include "graph-app.fullname" . }}-embedding-engine
-  minReplicaCount: {{ .Values.embeddingEngine.autoscaling.minReplicaCount }}
-  maxReplicaCount: {{ .Values.embeddingEngine.autoscaling.maxReplicaCount }}
+  minReplicaCount: {{ .Values.embeddingEngine.autoscaling.minReplicaCount | default 0 }}
+  maxReplicaCount: {{ .Values.embeddingEngine.autoscaling.maxReplicaCount | default 3 }}
+  pollingInterval: {{ .Values.embeddingEngine.autoscaling.pollingInterval | default 15 }}
+  cooldownPeriod: {{ .Values.embeddingEngine.autoscaling.cooldownPeriod | default 120 }}
   triggers:
     - type: rabbitmq
       metadata:
-        queueName: document_parsing_queue
+        queueName: {{ .Values.embeddingEngine.autoscaling.queueName | default "document_parsing_queue" | quote }}
         mode: QueueLength
-        value: "1"
+        value: {{ .Values.embeddingEngine.autoscaling.queueLength | default "1" | quote }}
       authenticationRef:
         name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
 {{- end }}

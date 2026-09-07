@@ -1,0 +1,428 @@
+################################################################################
+# Via Carraria Helm Values - Production Profile (Google Cloud Platform / GKE)
+#
+# Optimized for enterprise cloud deployment on Google Kubernetes Engine:
+# - Automated SSL / TLS certificate lifecycle via cert-manager (Let's Encrypt Production)
+# - Custom domain routing for 'viacarraria.com' and sub-services
+# - High Availability: Multi-replica API & Frontend with PodAntiAffinity and PodDisruptionBudgets
+# - Autoscaling: HorizontalPodAutoscaler (HPA) for API/Web; KEDA Scale-to-Zero for GPU/Workers
+# - Zero-Trust Network Policies restricting cross-pod communication
+# - GCP Workload Identity & hardened PodSecurityStandards (non-root, dropped capabilities)
+# - Product Quantization (PQ) enabled for Weaviate vector memory compression
+# - GCP SSD persistent storage class ('premium-rwo')
+################################################################################
+
+global:
+  imagePullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  annotations:
+    # Bind Kubernetes ServiceAccount to GCP IAM Service Account via Workload Identity
+    iam.gke.io/gcp-service-account: "viacarraria-k8s@PROJECT_ID.iam.gserviceaccount.com"
+  automountServiceAccountToken: false
+
+secrets:
+  create: true
+  # In production, inject production secrets via external secrets, SOPS, or CI/CD
+  databaseUrl: "postgresql://viacarraria_user:CHANGE_ME_STRONG_PROD_DB_PASSWORD@10.0.0.5:5432/viacarraria_prod"
+  redisUrl: "redis://:CHANGE_ME_STRONG_PROD_REDIS_PASSWORD@10.0.0.6:6379"
+  rabbitMqUrl: "amqp://viacarraria:CHANGE_ME_STRONG_PROD_RABBIT_PASSWORD@viacarraria-rabbitmq:5672"
+  betterAuthUrl: "https://viacarraria.com/api"
+  betterAuthSecret: "CHANGE_ME_WITH_A_SECURE_64_CHARACTER_RANDOM_HEX_SECRET_FOR_AUTH"
+  frontendOrigin: "https://viacarraria.com"
+  googleClientId: "YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com"
+  googleClientSecret: "YOUR_GOOGLE_OAUTH_CLIENT_SECRET"
+  internalServiceToken: "CHANGE_ME_WITH_A_STRONG_INTERNAL_SERVICE_AUTHENTICATION_TOKEN"
+  upstashRedisRestUrl: ""
+  upstashRedisRestToken: ""
+
+uploads:
+  enabled: true
+  storageClass: "premium-rwo"
+  size: 50Gi
+
+storage:
+  driver: s3
+  s3:
+    # Google Cloud Storage (GCS) S3-interoperability endpoint
+    endpoint: "https://storage.googleapis.com"
+    region: "auto"
+    bucket: "viacarraria-production-sources"
+    accessKey: "GCP_HMAC_ACCESS_KEY_ID"
+    secretKey: "GCP_HMAC_SECRET_ACCESS_KEY"
+    forcePathStyle: "false"
+    publicUrl: "https://storage.googleapis.com/viacarraria-production-sources"
+    lifecycle:
+      abortIncompleteMultipartDays: 1
+      transitionIaDays: 90
+      transitionGlacierDays: 365
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    # Automated Let's Encrypt SSL issuance and renewal
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    acme.cert-manager.io/http01-edit-in-place: "true"
+    # SSL & Security Headers
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: SAMEORIGIN";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains; preload";
+    # Proxy timeouts & body sizes for document uploads
+    nginx.ingress.kubernetes.io/proxy-body-size: "128m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # Rate Limiting protection at Ingress edge
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+  certManager:
+    enabled: true
+    createClusterIssuer: true
+    clusterIssuer: "letsencrypt-prod"
+    email: "security@viacarraria.com"
+    acmeServer: "https://acme-v02.api.letsencrypt.org/directory"
+  tls:
+    enabled: true
+    secretName: "viacarraria-production-tls"
+  hosts:
+    - host: viacarraria.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /socket.io
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /
+          pathType: Prefix
+          serviceName: frontend
+          servicePort: 80
+
+# Zero-trust network segmentation
+networkPolicy:
+  enabled: true
+
+frontend:
+  enabled: true
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  hpa:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+  pdb:
+    enabled: true
+    minAvailable: 2
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                    - frontend
+            topologyKey: "topology.kubernetes.io/zone"
+
+# Standalone Admin Portal with Tailscale Zero-Trust VPN Access
+admin:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  tailscale:
+    enabled: true
+    hostname: "viacarraria-admin-prod"
+    tags: "tag:k8s-prod"
+    authKeySecret: "viacarraria-tailscale-auth"
+    authKeySecretKey: "TS_AUTHKEY"
+    sidecar:
+      enabled: true
+      userspace: true
+    ingress:
+      enabled: true
+      className: "tailscale"
+
+backend:
+  enabled: true
+  replicaCount: 3
+  env:
+    nodeEnv: production
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2500m
+      memory: 2560Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  hpa:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 16
+    targetCPUUtilizationPercentage: 65
+    targetMemoryUtilizationPercentage: 75
+  pdb:
+    enabled: true
+    minAvailable: 2
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                    - backend
+            topologyKey: "topology.kubernetes.io/zone"
+
+parsingWorker:
+  enabled: true
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 16
+    pollingInterval: 10
+    cooldownPeriod: 45
+    queueName: "document_parsing_queue"
+    queueLength: "1"
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2048Mi
+    limits:
+      cpu: 4000m
+      memory: 6144Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  nodeSelector:
+    cloud.google.com/gke-spot: "true"
+  tolerations:
+    - key: "cloud.google.com/gke-spot"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+embeddingEngine:
+  enabled: true
+  modelId: "sentence-transformers/all-MiniLM-L6-v2"
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 6
+    pollingInterval: 10
+    cooldownPeriod: 120
+    queueName: "document_parsing_queue"
+    queueLength: "1"
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 4096Mi
+    limits:
+      cpu: 6000m
+      memory: 8192Mi
+  nodeSelector:
+    cloud.google.com/gke-spot: "true"
+  tolerations:
+    - key: "cloud.google.com/gke-spot"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+rerankingEngine:
+  enabled: true
+  modelId: "BAAI/bge-reranker-base"
+  replicaCount: 1
+  autoscaling:
+    enabled: true
+    minReplicaCount: 1
+    maxReplicaCount: 4
+  resources:
+    requests:
+      cpu: 1500m
+      memory: 3072Mi
+    limits:
+      cpu: 4000m
+      memory: 6144Mi
+
+databaseMigrate:
+  enabled: true
+  seed: false
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+
+# Production Weaviate Vector DB (In-cluster StatefulSet with Product Quantization)
+weaviate:
+  enabled: true
+  anonymousAccess: "true"
+  grpcPort: "50051"
+  productQuantization:
+    enabled: true
+    trainingLimit: 10000
+    segments: 64
+  persistence:
+    storageClass: "premium-rwo"
+    size: 100Gi
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4096Mi
+    limits:
+      cpu: 4000m
+      memory: 12288Mi
+
+# Production RabbitMQ (In-cluster StatefulSet with DLQ and persistence)
+rabbitmq:
+  enabled: true
+  auth:
+    username: viacarraria
+    password: "CHANGE_ME_STRONG_PROD_RABBIT_PASSWORD"
+  persistence:
+    storageClass: "premium-rwo"
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+
+# In production, Cloud SQL and Cloud Memorystore are recommended, but in-cluster is supported:
+postgresql:
+  enabled: false # Set true if not using managed GCP Cloud SQL
+  externalHost: "10.0.0.5"
+
+redis:
+  enabled: false # Set true if not using managed GCP Cloud Memorystore
+  externalHost: "10.0.0.6"
+
+minio:
+  enabled: false # Production utilizes Google Cloud Storage (GCS)
+
+# Inactive Graph & Resource Retention Policies
+retention:
+  inactivityDays: 90
+  gracePeriodDays: 7
+  scheduleIntervalHours: 24
+  autoPurgeEnabled: true
+  cronJob:
+    enabled: true
+    schedule: "0 3 * * *"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 5
+    failedJobsHistoryLimit: 2
+    image:
+      repository: curlimages/curl
+      tag: "8.12.1"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+# Admin Audit Log Cold Storage Archival & Rotation
+auditArchival:
+  olderThanDays: 7
+  retainActiveCount: 100
+  cronJob:
+    enabled: true
+    schedule: "0 2 * * *"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 5
+    failedJobsHistoryLimit: 2
+    image:
+      repository: curlimages/curl
+      tag: "8.12.1"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+# Tailscale Kubernetes Operator Sub-Chart (Zero-Trust Ingress & Egress Provider)
+tailscale-operator:
+  enabled: true
+  operatorConfig:
+    defaultTags:
+      - "tag:k8s-prod"
+    hostname: "viacarraria-ts-operator-prod"
+  oauth:
+    clientId: ""
+    clientSecret: ""
+    secretName: "tailscale-oauth-credentials"
+  apiServerProxyConfig:
+    mode: "disabled"
+

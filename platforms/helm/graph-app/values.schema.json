@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Values",
+  "type": "object",
+  "required": ["secrets", "storage", "frontend", "backend"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "imagePullPolicy": {
+          "type": "string",
+          "enum": ["Always", "Never", "IfNotPresent"]
+        }
+      }
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "annotations": { "type": "object" },
+        "automountServiceAccountToken": { "type": "boolean" }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "required": [
+        "databaseUrl",
+        "redisUrl",
+        "rabbitMqUrl",
+        "betterAuthUrl",
+        "betterAuthSecret",
+        "frontendOrigin",
+        "internalServiceToken"
+      ],
+      "properties": {
+        "create": { "type": "boolean" },
+        "databaseUrl": { "type": "string" },
+        "redisUrl": { "type": "string" },
+        "rabbitMqUrl": { "type": "string" },
+        "betterAuthUrl": { "type": "string" },
+        "betterAuthSecret": { "type": "string", "minLength": 16 },
+        "frontendOrigin": { "type": "string" },
+        "googleClientId": { "type": "string" },
+        "googleClientSecret": { "type": "string" },
+        "internalServiceToken": { "type": "string", "minLength": 8 },
+        "upstashRedisRestUrl": { "type": "string" },
+        "upstashRedisRestToken": { "type": "string" }
+      }
+    },
+    "uploads": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "storageClass": { "type": "string" },
+        "size": { "type": "string" }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "required": ["driver"],
+      "properties": {
+        "driver": { "type": "string", "enum": ["s3", "local"] },
+        "s3": {
+          "type": "object",
+          "properties": {
+            "endpoint": { "type": "string" },
+            "region": { "type": "string" },
+            "bucket": { "type": "string" },
+            "accessKey": { "type": "string" },
+            "secretKey": { "type": "string" },
+            "forcePathStyle": { "type": "string" },
+            "publicUrl": { "type": "string" },
+            "lifecycle": {
+              "type": "object",
+              "properties": {
+                "abortIncompleteMultipartDays": { "type": "number", "minimum": 1 },
+                "transitionIaDays": { "type": "number", "minimum": 0 },
+                "transitionGlacierDays": { "type": "number", "minimum": 0 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "annotations": { "type": "object" },
+        "certManager": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "createClusterIssuer": { "type": "boolean" },
+            "clusterIssuer": { "type": "string" },
+            "email": { "type": "string" },
+            "acmeServer": { "type": "string" }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "secretName": { "type": "string" }
+          }
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["host", "paths"],
+            "properties": {
+              "host": { "type": "string" },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["path", "serviceName", "servicePort"],
+                  "properties": {
+                    "path": { "type": "string" },
+                    "pathType": { "type": "string" },
+                    "serviceName": { "type": "string" },
+                    "servicePort": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" }
+          }
+        }
+      }
+    },
+    "admin": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" }
+          }
+        },
+        "tailscale": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "hostname": { "type": "string" },
+            "tags": { "type": "string" },
+            "authKey": { "type": "string" },
+            "authKeySecret": { "type": "string" },
+            "authKeySecretKey": { "type": "string" },
+            "sidecar": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "userspace": { "type": "boolean" }
+              }
+            },
+            "ingress": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "className": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" }
+          }
+        }
+      }
+    },
+    "parsingWorker": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "embeddingEngine": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "rerankingEngine": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "databaseMigrate": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "seed": { "type": "boolean" }
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "redis": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "rabbitmq": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "weaviate": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "minio": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "inactivityDays": { "type": "integer", "minimum": 1 },
+        "gracePeriodDays": { "type": "integer", "minimum": 0 },
+        "scheduleIntervalHours": { "type": "integer", "minimum": 1 },
+        "autoPurgeEnabled": { "type": "boolean" },
+        "cronJob": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "schedule": { "type": "string" },
+            "concurrencyPolicy": { "type": "string" },
+            "successfulJobsHistoryLimit": { "type": "integer" },
+            "failedJobsHistoryLimit": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "auditArchival": {
+      "type": "object",
+      "properties": {
+        "olderThanDays": { "type": "integer", "minimum": 0 },
+        "retainActiveCount": { "type": "integer", "minimum": 0 },
+        "cronJob": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "schedule": { "type": "string" },
+            "concurrencyPolicy": { "type": "string" },
+            "successfulJobsHistoryLimit": { "type": "integer" },
+            "failedJobsHistoryLimit": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "tailscale-operator": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "operatorConfig": {
+          "type": "object",
+          "properties": {
+            "defaultTags": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "hostname": { "type": "string" }
+          }
+        },
+        "oauth": {
+          "type": "object",
+          "properties": {
+            "clientId": { "type": "string" },
+            "clientSecret": { "type": "string" },
+            "secretName": { "type": "string" }
+          }
+        },
+        "apiServerProxyConfig": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

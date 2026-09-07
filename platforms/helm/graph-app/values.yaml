@@ -1,38 +1,106 @@
+################################################################################
+# Via Carraria Helm Chart - Default Baseline Values
+#
+# This chart deploys the entire Via Carraria knowledge canvas system:
+# - Frontend: Interactive knowledge canvas (React Flow, Vite, Nginx)
+# - Backend: API gateway, authentication, search, and graph orchestration (NestJS)
+# - Parsing Worker: Document parsing & chunking engine (FastStream, Docling)
+# - Embedding Engine: Neural vector embedding server (Hugging Face TEI / Gemma)
+# - Reranking Engine: Neural passage reranker (BAAI/bge-reranker-base)
+# - In-cluster Infrastructure (Toggleable): Postgres, Redis, RabbitMQ, Weaviate, MinIO
+# - Database Migrations: Prisma migration lifecycle hook Job
+# - Ingress, Routing & SSL: Ingress controller with automated cert-manager ACME TLS
+# - Autoscaling & Zero-Waste: KEDA event-driven queue autoscaling and Kubernetes HPA
+################################################################################
+
 global:
   imagePullPolicy: IfNotPresent
 
 nameOverride: ""
 fullnameOverride: ""
 
+# ServiceAccount configuration for Workload Identity and RBAC
+serviceAccount:
+  create: true
+  annotations: {}
+  automountServiceAccountToken: false
+
+# Shared secrets injected into pods via the runtime secret
 secrets:
   create: true
-  databaseUrl: postgresql://postgres:change-me@postgres:5432/viacarraria
-  redisUrl: redis://redis:6379
-  rabbitMqUrl: amqp://guest:guest@rabbitmq:5672
-  betterAuthUrl: https://api.example.com
-  betterAuthSecret: change-me-with-a-random-32-character-secret
-  frontendOrigin: https://app.example.com
+  databaseUrl: "postgresql://postgres:change-me-postgres@postgres:5432/viacarraria"
+  redisUrl: "redis://:change-me-redis@redis:6379"
+  rabbitMqUrl: "amqp://rabbitmq:change-me-rabbitmq@rabbitmq:5672"
+  betterAuthUrl: "https://api.example.com"
+  betterAuthSecret: "change-me-with-a-random-32-character-secret-value-now"
+  frontendOrigin: "https://app.example.com"
   googleClientId: ""
   googleClientSecret: ""
-  internalServiceToken: change-me
+  internalServiceToken: "change-me-with-a-secure-random-internal-token"
   upstashRedisRestUrl: ""
   upstashRedisRestToken: ""
 
+# Shared Persistent Volume Claim for temporary / local file uploads
 uploads:
+  enabled: true
   storageClass: ""
   size: 10Gi
 
+# Object Storage driver configuration
 storage:
-  driver: s3
+  driver: s3 # 's3' or 'local'
   s3:
     endpoint: "http://minio:9000"
     region: "us-east-1"
     bucket: "viacarraria-sources"
     accessKey: "minioadmin"
-    secretKey: "minioadmin"
+    secretKey: "change-me-minio"
     forcePathStyle: "true"
     publicUrl: ""
+    lifecycle:
+      abortIncompleteMultipartDays: 1
+      transitionIaDays: 0
+      transitionGlacierDays: 0
 
+# Ingress controller, host routing and automated SSL (cert-manager)
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  certManager:
+    enabled: true
+    createClusterIssuer: false
+    clusterIssuer: "letsencrypt-prod"
+    email: "admin@example.com"
+    acmeServer: "https://acme-v02.api.letsencrypt.org/directory"
+  tls:
+    enabled: true
+    secretName: "" # Defaults to '<fullname>-tls'
+  hosts:
+    - host: app.example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /socket.io
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /
+          pathType: Prefix
+          serviceName: frontend
+          servicePort: 80
+
+# Zero-trust network policy restricting pod-to-pod traffic
+networkPolicy:
+  enabled: false
+
+# Frontend Web Application (React + Vite static SPA served via Nginx)
 frontend:
   enabled: true
   image:
@@ -42,7 +110,84 @@ frontend:
   service:
     type: ClusterIP
     port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 80
+  pdb:
+    enabled: false
+    minAvailable: 1
+  affinity: {}
+  nodeSelector: {}
+  tolerations: []
 
+# Standalone Admin Portal (Decoupled SPA with Tailscale VPN Ingress / Sidecar)
+admin:
+  enabled: true
+  image:
+    repository: viacarraria/admin
+    tag: latest
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  affinity: {}
+  nodeSelector: {}
+  tolerations: []
+  tailscale:
+    enabled: false
+    hostname: "viacarraria-admin"
+    tags: "tag:k8s"
+    authKey: ""
+    authKeySecret: ""
+    authKeySecretKey: "TS_AUTHKEY"
+    sidecar:
+      enabled: false
+      image:
+        repository: tailscale/tailscale
+        tag: v1.78.1
+      userspace: true
+    service:
+      enabled: false
+    ingress:
+      enabled: false
+      className: "tailscale"
+
+# Backend API Service (NestJS API, Auth, Graph Orchestration, Weaviate Proxy)
 backend:
   enabled: true
   image:
@@ -52,7 +197,38 @@ backend:
   service:
     type: ClusterIP
     port: 3000
+  env:
+    nodeEnv: production
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1500m
+      memory: 1536Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+  pdb:
+    enabled: false
+    minAvailable: 1
+  affinity: {}
+  nodeSelector: {}
+  tolerations: []
 
+# Parsing Worker (Async document ingestion, Docling parser, FastStream queue consumer)
 parsingWorker:
   enabled: true
   image:
@@ -62,26 +238,275 @@ parsingWorker:
   autoscaling:
     enabled: true
     minReplicaCount: 0
-    maxReplicaCount: 10
+    maxReplicaCount: 8
+    pollingInterval: 15
+    cooldownPeriod: 60
+    queueName: "document_parsing_queue"
+    queueLength: "1"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 3072Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  affinity: {}
+  nodeSelector: {}
+  tolerations: []
 
+# Neural Embedding Engine (Hugging Face Text Embeddings Inference / TEI)
 embeddingEngine:
   enabled: true
   image:
     repository: viacarraria/embedding-engine
     tag: latest
+  modelId: "sentence-transformers/all-MiniLM-L6-v2"
   replicaCount: 0
   autoscaling:
     enabled: true
     minReplicaCount: 0
     maxReplicaCount: 3
+    pollingInterval: 15
+    cooldownPeriod: 120
+    queueName: "document_parsing_queue"
+    queueLength: "1"
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 1536Mi
+    limits:
+      cpu: 3000m
+      memory: 4096Mi
+  podSecurityContext: {}
+  securityContext: {}
+  affinity: {}
+  nodeSelector: {}
+  tolerations: []
 
+# Neural Reranking Engine (BAAI/bge-reranker-base via TEI)
 rerankingEngine:
   enabled: true
   image:
     repository: viacarraria/embedding-engine
     tag: latest
+  modelId: "BAAI/bge-reranker-base"
   replicaCount: 0
   autoscaling:
     enabled: true
     minReplicaCount: 0
     maxReplicaCount: 3
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 1536Mi
+    limits:
+      cpu: 3000m
+      memory: 4096Mi
+  podSecurityContext: {}
+  securityContext: {}
+  affinity: {}
+  nodeSelector: {}
+  tolerations: []
+
+# Database Migration Hook Job (Prisma deploy & optional seed)
+databaseMigrate:
+  enabled: true
+  image:
+    repository: viacarraria/database-migrate
+    tag: latest
+  seed: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+
+# In-Cluster PostgreSQL 16 StatefulSet (enabled for Minikube / self-hosted)
+postgresql:
+  enabled: false
+  image:
+    repository: postgres
+    tag: 16-alpine
+  auth:
+    database: viacarraria
+    username: postgres
+    password: "change-me-postgres"
+  persistence:
+    storageClass: ""
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  externalHost: ""
+
+# In-Cluster Redis 7 Deployment (enabled for Minikube / self-hosted)
+redis:
+  enabled: false
+  image:
+    repository: redis
+    tag: 7-alpine
+  auth:
+    password: "change-me-redis"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  externalHost: ""
+
+# In-Cluster RabbitMQ 3.13 StatefulSet (enabled for Minikube / self-hosted)
+rabbitmq:
+  enabled: false
+  image:
+    repository: rabbitmq
+    tag: 3.13-management-alpine
+  auth:
+    username: rabbitmq
+    password: "change-me-rabbitmq"
+  persistence:
+    storageClass: ""
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  externalHost: ""
+
+# In-Cluster Weaviate Vector DB StatefulSet (enabled for Minikube / self-hosted)
+weaviate:
+  enabled: false
+  image:
+    repository: cr.weaviate.io/semitechnologies/weaviate
+    tag: 1.32.4
+  anonymousAccess: "true"
+  grpcPort: "50051"
+  productQuantization:
+    enabled: false
+    trainingLimit: 10000
+    segments: 64
+  persistence:
+    storageClass: ""
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 3072Mi
+  externalHttpUrl: ""
+  externalGrpcHost: ""
+
+# In-Cluster MinIO Object Storage (enabled for Minikube / local S3 testing)
+minio:
+  enabled: false
+  image:
+    repository: minio/minio
+    tag: RELEASE.2024-08-03T04-33-23Z
+  auth:
+    rootUser: "minioadmin"
+    rootPassword: "change-me-minio"
+  persistence:
+    storageClass: ""
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  createBuckets: true
+  # MinIO as Storage Proxy to Upstream Cloud Storage (AWS S3 or GCP)
+  upstreamTier:
+    enabled: false
+    provider: "s3" # "s3" or "gcs"
+    s3:
+      endpoint: "https://s3.amazonaws.com"
+      region: "us-east-1"
+      bucket: ""
+      accessKey: ""
+      secretKey: ""
+    gcs:
+      bucket: ""
+      credentialsFile: "/etc/minio/gcs-key.json"
+
+# Inactive Graph & Resource Retention Policies
+retention:
+  inactivityDays: 90
+  gracePeriodDays: 7
+  scheduleIntervalHours: 24
+  autoPurgeEnabled: true
+  cronJob:
+    enabled: true
+    schedule: "0 3 * * *"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 1
+    image:
+      repository: curlimages/curl
+      tag: "8.12.1"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+# Admin Audit Log Cold Storage Archival & Rotation
+auditArchival:
+  olderThanDays: 7
+  retainActiveCount: 100
+  cronJob:
+    enabled: true
+    schedule: "0 2 * * *"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 1
+    image:
+      repository: curlimages/curl
+      tag: "8.12.1"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+# Tailscale Kubernetes Operator Sub-Chart (Zero-Trust Ingress & Egress Provider)
+tailscale-operator:
+  enabled: false
+  operatorConfig:
+    defaultTags:
+      - "tag:k8s"
+    hostname: "viacarraria-ts-operator"
+  oauth:
+    clientId: ""
+    clientSecret: ""
+  apiServerProxyConfig:
+    mode: "disabled"

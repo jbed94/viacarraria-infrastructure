@@ -5,8 +5,11 @@ metadata:
   name: {{ include "graph-app.fullname" . }}-backend
   labels:
     {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
 spec:
+  {{- if not .Values.backend.hpa.enabled }}
   replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: backend
@@ -17,35 +20,79 @@ spec:
         app.kubernetes.io/component: backend
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "graph-app.fullname" . }}-app
+      {{- end }}
+      {{- with .Values.backend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          {{- with .Values.backend.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
-            - containerPort: 3000
+            - name: http
+              containerPort: 3000
           envFrom:
             - secretRef:
                 name: {{ include "graph-app.fullname" . }}-runtime
           env:
+            - name: NODE_ENV
+              value: {{ .Values.backend.env.nodeEnv | default "production" | quote }}
             - name: PORT
               value: "3000"
-            - name: WEAVIATE_HTTP_URL
-              value: http://weaviate:8080
             - name: TEI_URL
               value: http://{{ include "graph-app.fullname" . }}-embedding-engine:80
             - name: TEI_RERANK_URL
               value: http://{{ include "graph-app.fullname" . }}-reranking-engine:80
             - name: UPLOAD_DIR
               value: /data/uploads
+          {{- if or .Values.uploads.enabled (eq .Values.storage.driver "local") }}
           volumeMounts:
             - name: uploads
               mountPath: /data/uploads
+          {{- end }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
           readinessProbe:
-            httpGet: { path: /api/admin/health, port: 3000 }
+            httpGet:
+              path: /api/admin/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/admin/health
+              port: 3000
+            initialDelaySeconds: 25
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+      {{- if or .Values.uploads.enabled (eq .Values.storage.driver "local") }}
       volumes:
         - name: uploads
           persistentVolumeClaim:
             claimName: {{ include "graph-app.fullname" . }}-uploads
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -53,6 +100,7 @@ metadata:
   name: {{ include "graph-app.fullname" . }}-backend
   labels:
     {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
 spec:
   type: {{ .Values.backend.service.type }}
   selector:
@@ -60,5 +108,6 @@ spec:
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
     - port: {{ .Values.backend.service.port }}
-      targetPort: 3000
+      targetPort: http
+      name: http
 {{- end }}
