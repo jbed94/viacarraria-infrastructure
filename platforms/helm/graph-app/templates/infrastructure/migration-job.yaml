@@ -31,8 +31,8 @@ spec:
             - sh
             - -c
             - |
-              echo "Executing database migrations..."
-              pnpm migrate:deploy
+              echo "Synchronizing database schema..."
+              pnpm db:push
               {{- if .Values.databaseMigrate.seed }}
               echo "Seeding database..."
               pnpm seed

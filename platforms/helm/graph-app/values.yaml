@@ -243,6 +243,8 @@ parsingWorker:
     cooldownPeriod: 60
     queueName: "document_parsing_queue"
     queueLength: "1"
+    tagMatchingQueueName: "tag_matching_queue"
+    tagMatchingQueueLength: "1"
   resources:
     requests:
       cpu: 500m
@@ -279,6 +281,11 @@ embeddingEngine:
     cooldownPeriod: 120
     queueName: "document_parsing_queue"
     queueLength: "1"
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 5Gi
   resources:
     requests:
       cpu: 1000m
@@ -304,6 +311,15 @@ rerankingEngine:
     enabled: true
     minReplicaCount: 0
     maxReplicaCount: 3
+    pollingInterval: 15
+    cooldownPeriod: 120
+    queueName: "tag_matching_queue"
+    queueLength: "1"
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 5Gi
   resources:
     requests:
       cpu: 1000m

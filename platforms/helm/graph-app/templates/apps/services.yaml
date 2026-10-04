@@ -56,6 +56,8 @@ spec:
               value: http://{{ include "graph-app.fullname" . }}-backend:3000/api
             - name: TEI_URL
               value: http://{{ include "graph-app.fullname" . }}-embedding-engine:80
+            - name: TEI_RERANK_URL
+              value: http://{{ include "graph-app.fullname" . }}-reranking-engine:80
           {{- if or .Values.uploads.enabled (eq .Values.storage.driver "local") }}
           volumeMounts:
             - name: uploads
@@ -71,6 +73,25 @@ spec:
       {{- end }}
 {{- end }}
 ---
+{{- if and .Values.embeddingEngine.enabled .Values.embeddingEngine.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "graph-app.fullname" . }}-embedding-cache
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embedding-engine
+spec:
+  accessModes:
+    - {{ .Values.embeddingEngine.persistence.accessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.embeddingEngine.persistence.size | default "5Gi" }}
+  {{- with .Values.embeddingEngine.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+{{- end }}
 {{- if .Values.embeddingEngine.enabled }}
 apiVersion: apps/v1
 kind: Deployment
@@ -128,6 +149,9 @@ spec:
           ports:
             - name: http
               containerPort: 80
+          volumeMounts:
+            - name: model-cache
+              mountPath: /data
           resources:
             {{- toYaml .Values.embeddingEngine.resources | nindent 12 }}
           readinessProbe:
@@ -144,6 +168,14 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 5
+      volumes:
+        - name: model-cache
+          {{- if .Values.embeddingEngine.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "graph-app.fullname" . }}-embedding-cache
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -163,6 +195,25 @@ spec:
       name: http
 {{- end }}
 ---
+{{- if and .Values.rerankingEngine.enabled .Values.rerankingEngine.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "graph-app.fullname" . }}-reranking-cache
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reranking-engine
+spec:
+  accessModes:
+    - {{ .Values.rerankingEngine.persistence.accessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.rerankingEngine.persistence.size | default "5Gi" }}
+  {{- with .Values.rerankingEngine.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+---
+{{- end }}
 {{- if .Values.rerankingEngine.enabled }}
 apiVersion: apps/v1
 kind: Deployment
@@ -220,6 +271,9 @@ spec:
           ports:
             - name: http
               containerPort: 80
+          volumeMounts:
+            - name: model-cache
+              mountPath: /data
           resources:
             {{- toYaml .Values.rerankingEngine.resources | nindent 12 }}
           readinessProbe:
@@ -236,6 +290,14 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 5
+      volumes:
+        - name: model-cache
+          {{- if .Values.rerankingEngine.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "graph-app.fullname" . }}-reranking-cache
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

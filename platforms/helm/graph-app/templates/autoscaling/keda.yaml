@@ -1,4 +1,4 @@
-{{- if or .Values.parsingWorker.autoscaling.enabled .Values.embeddingEngine.autoscaling.enabled }}
+{{- if or .Values.parsingWorker.autoscaling.enabled .Values.embeddingEngine.autoscaling.enabled .Values.rerankingEngine.autoscaling.enabled }}
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
@@ -34,6 +34,13 @@ spec:
         value: {{ .Values.parsingWorker.autoscaling.queueLength | default "1" | quote }}
       authenticationRef:
         name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
+    - type: rabbitmq
+      metadata:
+        queueName: {{ .Values.parsingWorker.autoscaling.tagMatchingQueueName | default "tag_matching_queue" | quote }}
+        mode: QueueLength
+        value: {{ .Values.parsingWorker.autoscaling.tagMatchingQueueLength | default "1" | quote }}
+      authenticationRef:
+        name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
 ---
 {{- end }}
 {{- if .Values.embeddingEngine.autoscaling.enabled }}
@@ -56,6 +63,30 @@ spec:
         queueName: {{ .Values.embeddingEngine.autoscaling.queueName | default "document_parsing_queue" | quote }}
         mode: QueueLength
         value: {{ .Values.embeddingEngine.autoscaling.queueLength | default "1" | quote }}
+      authenticationRef:
+        name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
+---
+{{- end }}
+{{- if and .Values.rerankingEngine.enabled .Values.rerankingEngine.autoscaling.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "graph-app.fullname" . }}-reranking-engine
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "graph-app.fullname" . }}-reranking-engine
+  minReplicaCount: {{ .Values.rerankingEngine.autoscaling.minReplicaCount | default 0 }}
+  maxReplicaCount: {{ .Values.rerankingEngine.autoscaling.maxReplicaCount | default 3 }}
+  pollingInterval: {{ .Values.rerankingEngine.autoscaling.pollingInterval | default 15 }}
+  cooldownPeriod: {{ .Values.rerankingEngine.autoscaling.cooldownPeriod | default 120 }}
+  triggers:
+    - type: rabbitmq
+      metadata:
+        queueName: {{ .Values.rerankingEngine.autoscaling.queueName | default "tag_matching_queue" | quote }}
+        mode: QueueLength
+        value: {{ .Values.rerankingEngine.autoscaling.queueLength | default "1" | quote }}
       authenticationRef:
         name: {{ include "graph-app.fullname" . }}-rabbitmq-auth
 {{- end }}

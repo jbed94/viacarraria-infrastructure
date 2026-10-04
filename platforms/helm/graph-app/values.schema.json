@@ -207,21 +207,45 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "replicaCount": { "type": "integer", "minimum": 0 }
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "autoscaling": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicaCount": { "type": "integer", "minimum": 0 },
+            "maxReplicaCount": { "type": "integer", "minimum": 1 }
+          }
+        }
       }
     },
     "embeddingEngine": {
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "replicaCount": { "type": "integer", "minimum": 0 }
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "autoscaling": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicaCount": { "type": "integer", "minimum": 0 },
+            "maxReplicaCount": { "type": "integer", "minimum": 1 }
+          }
+        }
       }
     },
     "rerankingEngine": {
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "replicaCount": { "type": "integer", "minimum": 0 }
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "autoscaling": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "minReplicaCount": { "type": "integer", "minimum": 0 },
+            "maxReplicaCount": { "type": "integer", "minimum": 1 }
+          }
+        }
       }
     },
     "databaseMigrate": {

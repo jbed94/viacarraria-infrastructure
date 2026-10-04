@@ -1,5 +1,8 @@
 name: viacarraria
 
+include:
+  - docker-compose.infra.yaml
+
 services:
   database-migrate:
     build:
@@ -79,6 +82,7 @@ services:
       S3_PUBLIC_URL: ${S3_PUBLIC_URL:-http://localhost:9000}
     ports:
       - "3000:3000"
+    restart: unless-stopped
     volumes:
       - uploads-data:/data/uploads
     depends_on:
@@ -90,11 +94,14 @@ services:
         condition: service_healthy
       weaviate:
         condition: service_started
+      embedding-engine:
+        condition: service_healthy
     healthcheck:
       test: [CMD-SHELL, "node -e \"fetch('http://localhost:3000/api/admin/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 30s
     networks:
       - graph-infra
 
@@ -125,11 +132,34 @@ services:
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
     volumes:
       - uploads-data:/data/uploads
+    restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       embedding-engine:
-        condition: service_started
+        condition: service_healthy
+    networks:
+      - graph-infra
+
+  model-downloader:
+    build:
+      context: ../../../viacarraria-services
+      dockerfile: platforms/docker/model-downloader.Dockerfile
+    restart: "no"
+    environment:
+      TEI_MODEL_ID: ${TEI_MODEL_ID:-sentence-transformers/all-MiniLM-L6-v2}
+      TEI_RERANK_MODEL_ID: ${TEI_RERANK_MODEL_ID:-BAAI/bge-reranker-base}
+      EMBEDDING_CACHE_DIR: /data/embedding
+      RERANKING_CACHE_DIR: /data/reranking
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HUB_DISABLE_XET: "1"
+    volumes:
+      - embedding-cache:/data/embedding
+      - reranking-cache:/data/reranking
     networks:
       - graph-infra
 
@@ -140,6 +170,18 @@ services:
     command: [--model-id, "${TEI_MODEL_ID:-sentence-transformers/all-MiniLM-L6-v2}", --port, "80"]
     ports:
       - "127.0.0.1:8081:80"
+    restart: unless-stopped
+    volumes:
+      - embedding-cache:/data
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     networks:
       - graph-infra
 
@@ -150,6 +192,18 @@ services:
     command: [--model-id, "${TEI_RERANK_MODEL_ID:-BAAI/bge-reranker-base}", --port, "80"]
     ports:
       - "127.0.0.1:8082:80"
+    restart: unless-stopped
+    volumes:
+      - reranking-cache:/data
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
     networks:
       - graph-infra
 
@@ -203,6 +257,8 @@ services:
 
 volumes:
   uploads-data:
+  embedding-cache:
+  reranking-cache:
 
 networks:
   graph-infra:
