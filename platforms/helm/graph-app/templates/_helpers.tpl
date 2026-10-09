@@ -25,7 +25,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "graph-app.databaseHost" -}}
 {{- if .Values.postgresql.enabled -}}
-{{ include "graph-app.fullname" . }}-postgresql
+{{ include "graph-app.fullname" . }}-postgresql.{{ .Release.Namespace }}.svc.cluster.local
 {{- else -}}
 {{- .Values.postgresql.externalHost | default "postgres" -}}
 {{- end -}}
@@ -41,7 +41,7 @@ postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.p
 
 {{- define "graph-app.redisHost" -}}
 {{- if .Values.redis.enabled -}}
-{{ include "graph-app.fullname" . }}-redis
+{{ include "graph-app.fullname" . }}-redis.{{ .Release.Namespace }}.svc.cluster.local
 {{- else -}}
 {{- .Values.redis.externalHost | default "redis" -}}
 {{- end -}}
@@ -57,7 +57,7 @@ redis://:{{ .Values.redis.auth.password }}@{{ include "graph-app.redisHost" . }}
 
 {{- define "graph-app.rabbitmqHost" -}}
 {{- if .Values.rabbitmq.enabled -}}
-{{ include "graph-app.fullname" . }}-rabbitmq
+{{ include "graph-app.fullname" . }}-rabbitmq.{{ .Release.Namespace }}.svc.cluster.local
 {{- else -}}
 {{- .Values.rabbitmq.externalHost | default "rabbitmq" -}}
 {{- end -}}

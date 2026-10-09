@@ -16,10 +16,10 @@ secrets:
   create: true
   databaseUrl: "postgresql://postgres:minikubepassword@viacarraria-graph-app-postgresql:5432/viacarraria"
   redisUrl: "redis://:minikubepassword@viacarraria-graph-app-redis:6379"
-  rabbitMqUrl: "amqp://rabbitmq:minikubepassword@viacarraria-graph-app-rabbitmq:5672"
-  betterAuthUrl: "http://viacarraria.local/api"
+  rabbitMqUrl: "amqp://rabbitmq:minikubepassword@viacarraria-graph-app-rabbitmq.viacarraria.svc.cluster.local:5672"
+  betterAuthUrl: "http://viacarraria.local"
   betterAuthSecret: "local-minikube-auth-secret-32-chars-long-rnd!"
-  frontendOrigin: "http://viacarraria.local"
+  frontendOrigin: "http://viacarraria.local,http://192.168.1.89:8080,http://100.122.139.123:8080,http://jcore:8080,http://localhost:8080,http://192.168.1.89,http://100.122.139.123,http://jcore.tail7756e6.ts.net:8080,https://jcore.tail7756e6.ts.net,https://jcore.tail7756e6.ts.net:8443,https://jcore:8443"
   internalServiceToken: "local-internal-token-for-services-auth"
 
 uploads:
@@ -67,6 +67,62 @@ ingress:
           pathType: Prefix
           serviceName: frontend
           servicePort: 80
+    - host: jcore
+      paths:
+        - path: /api
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /socket.io
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /
+          pathType: Prefix
+          serviceName: frontend
+          servicePort: 80
+    - host: jcore.tail7756e6.ts.net
+      paths:
+        - path: /api
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /socket.io
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /
+          pathType: Prefix
+          serviceName: frontend
+          servicePort: 80
+    - host: ""
+      paths:
+        - path: /api
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /socket.io
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /
+          pathType: Prefix
+          serviceName: frontend
+          servicePort: 80
+    - host: localhost
+      paths:
+        - path: /api
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /socket.io
+          pathType: Prefix
+          serviceName: backend
+          servicePort: 3000
+        - path: /
+          pathType: Prefix
+          serviceName: frontend
+          servicePort: 80
 
 networkPolicy:
   enabled: false
@@ -74,6 +130,16 @@ networkPolicy:
 frontend:
   enabled: true
   replicaCount: 1
+  podSecurityContext:
+    runAsNonRoot: false
+    runAsUser: 0
+  securityContext:
+    allowPrivilegeEscalation: true
+    capabilities:
+      add:
+        - CHOWN
+        - SETUID
+        - SETGID
   resources:
     requests:
       cpu: 50m
@@ -82,9 +148,15 @@ frontend:
       cpu: 250m
       memory: 128Mi
   hpa:
-    enabled: false
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 60
   pdb:
     enabled: false
+
+admin:
+  enabled: false
 
 backend:
   enabled: true
@@ -99,15 +171,26 @@ backend:
       cpu: 1000m
       memory: 768Mi
   hpa:
-    enabled: false
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 50
   pdb:
     enabled: false
 
 parsingWorker:
   enabled: true
-  replicaCount: 1
+  replicaCount: 0
   autoscaling:
-    enabled: false # Keep 1 pod running in Minikube without requiring KEDA operator
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 4
+    pollingInterval: 5
+    cooldownPeriod: 20
+    queueName: "document_parsing_queue"
+    queueLength: "1"
+    tagMatchingQueueName: "tag_matching_queue"
+    tagMatchingQueueLength: "1"
   resources:
     requests:
       cpu: 200m
@@ -118,9 +201,15 @@ parsingWorker:
 
 embeddingEngine:
   enabled: true
-  replicaCount: 1
+  replicaCount: 0
   autoscaling:
-    enabled: false # Keep 1 pod running in Minikube without requiring KEDA operator
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 3
+    pollingInterval: 5
+    cooldownPeriod: 20
+    queueName: "document_parsing_queue"
+    queueLength: "1"
   resources:
     requests:
       cpu: 300m
@@ -130,28 +219,34 @@ embeddingEngine:
       memory: 2048Mi
 
 rerankingEngine:
-  enabled: true
-  replicaCount: 1
+  enabled: false # Dense search via embeddingEngine is active; reranker can be enabled on demand
+  replicaCount: 0
   autoscaling:
     enabled: false
   resources:
     requests:
       cpu: 300m
-      memory: 512Mi
+      memory: 1024Mi
     limits:
-      cpu: 1500m
-      memory: 2048Mi
+      cpu: 2000m
+      memory: 4096Mi
 
 databaseMigrate:
   enabled: true
+  image:
+    repository: viacarraria/database-migrate
+    tag: latest
   seed: true
+  securityContext:
+    runAsNonRoot: false
+    runAsUser: 0
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
     limits:
       cpu: 500m
-      memory: 256Mi
+      memory: 512Mi
 
 # Self-Hosted In-Cluster Infrastructure for Minikube
 postgresql:
@@ -230,7 +325,7 @@ minio:
     limits:
       cpu: 500m
       memory: 512Mi
-  createBuckets: true
+  createBuckets: false
 
 # Inactive Graph & Resource Retention Policies
 retention:

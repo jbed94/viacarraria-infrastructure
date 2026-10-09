@@ -1,0 +1,349 @@
+################################################################################
+# Via Carraria Helm Values — Production Google Cloud Platform (GCP / GKE) Profile
+#
+# Architectural Topology:
+# - Cluster: Google Kubernetes Engine (GKE) with Workload Identity Federation
+# - Ingress & CDN: Google Cloud External Application Load Balancer + Cloud CDN + Cloud Armor
+# - Managed TLS: Google-Managed SSL Certificates (networking.gke.io/v1: ManagedCertificate)
+# - Relational DB: Google Cloud SQL for PostgreSQL 16 (Private Service Connect / VPC Peering)
+# - Caching & Rate Limiting: Google Cloud Memorystore for Redis
+# - Object Storage: Google Cloud Storage (GCS) Multi-Regional with Lifecycle Rules
+# - Storage CSI: GCP Compute Engine Persistent Disk (pd-balanced, pd-ssd)
+# - Autoscaling: GKE Cluster Autoscaler / Karpenter + KEDA queue-driven scale-to-zero + HPA
+# - Resilience: PodDisruptionBudgets (PDB), Zone Anti-Affinity, Spot/Preemptible Workers
+################################################################################
+
+global:
+  imagePullPolicy: IfNotPresent
+
+# GKE Workload Identity: Binds K8s ServiceAccount to Google IAM ServiceAccount
+serviceAccount:
+  create: true
+  annotations:
+    iam.gke.io/gcp-service-account: "viacarraria-k8s@PROJECT_ID.iam.gserviceaccount.com"
+  automountServiceAccountToken: true
+
+# Secrets injected via GKE Secret Manager / External Secrets Operator
+secrets:
+  create: true
+  databaseUrl: "postgresql://postgres:REPLACE_WITH_CLOUD_SQL_SECRET@10.0.0.5:5432/viacarraria?sslmode=verify-full"
+  redisUrl: "redis://default:REPLACE_WITH_MEMORYSTORE_SECRET@10.0.0.6:6379"
+  rabbitMqUrl: "amqp://rabbitmq:REPLACE_WITH_RABBITMQ_SECRET@viacarraria-graph-app-rabbitmq.viacarraria.svc.cluster.local:5672"
+  betterAuthUrl: "https://api.viacarraria.com"
+  betterAuthSecret: "REPLACE_WITH_PRODUCTION_32_CHAR_SECRET_MINIMUM"
+  frontendOrigin: "https://viacarraria.com,https://app.viacarraria.com,https://admin.viacarraria.com"
+  internalServiceToken: "REPLACE_WITH_HIGH_ENTROPY_INTERNAL_TOKEN"
+  upstashRedisRestUrl: ""
+  upstashRedisRestToken: ""
+
+# Persistent Storage for temporary file buffers using GKE Persistent Disk CSI
+uploads:
+  enabled: true
+  storageClass: "pd-balanced"
+  size: 50Gi
+
+# Google Cloud Storage (GCS) via S3 XML Interoperability or GCS Native Gateway
+storage:
+  driver: s3
+  s3:
+    endpoint: "https://storage.googleapis.com"
+    region: "auto"
+    bucket: "viacarraria-sources-prod"
+    accessKey: "REPLACE_WITH_GCS_HMAC_ACCESS_KEY"
+    secretKey: "REPLACE_WITH_GCS_HMAC_SECRET_KEY"
+    forcePathStyle: "false"
+    publicUrl: "https://storage.googleapis.com/viacarraria-sources-prod"
+    lifecycle:
+      abortIncompleteMultipartDays: 1
+      transitionIaDays: 30       # Nearline
+      transitionGlacierDays: 90  # Coldline / Archive
+
+# GKE Ingress & Google Cloud Load Balancing with Managed SSL Certificates
+ingress:
+  enabled: true
+  className: "gce" # Google Cloud External Application Load Balancer
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.allow-http: "false"
+    networking.gke.io/managed-certificates: "viacarraria-managed-cert"
+    networking.gke.io/v1beta1.FrontendConfig: "viacarraria-frontend-config" # Enforces HTTP -> HTTPS redirect
+    cloud.google.com/backend-config: '{"default": "viacarraria-backend-config"}' # Cloud CDN & Cloud Armor
+  certManager:
+    enabled: false # Handled via GCP ManagedCertificate resource
+  tls:
+    enabled: true
+    secretName: "" # Managed by GKE ManagedCertificate
+  hosts:
+    - host: app.viacarraria.com
+      paths:
+        - path: /api/*
+          pathType: ImplementationSpecific
+          serviceName: backend
+          servicePort: 3000
+        - path: /socket.io/*
+          pathType: ImplementationSpecific
+          serviceName: backend
+          servicePort: 3000
+        - path: /*
+          pathType: ImplementationSpecific
+          serviceName: frontend
+          servicePort: 80
+
+# Zero-Trust Pod Security & Network Policies
+networkPolicy:
+  enabled: true
+
+# Frontend Web Application (React Flow + Vite SPA on Nginx)
+frontend:
+  enabled: true
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  hpa:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  pdb:
+    enabled: true
+    minAvailable: 2
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: frontend
+            topologyKey: "topology.kubernetes.io/zone"
+
+# Backend API Gateway & Orchestration (NestJS)
+backend:
+  enabled: true
+  replicaCount: 3
+  env:
+    nodeEnv: production
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+  hpa:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 65
+    targetMemoryUtilizationPercentage: 80
+  pdb:
+    enabled: true
+    minAvailable: 2
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: backend
+            topologyKey: "topology.kubernetes.io/zone"
+
+# Standalone Decoupled Administration Panel (Restricted to Tailscale VPN Mesh)
+admin:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  tailscale:
+    enabled: true
+    hostname: "viacarraria-admin-prod"
+    tags: "tag:k8s,tag:prod"
+    authKeySecret: "tailscale-auth-secret"
+    authKeySecretKey: "TS_AUTHKEY"
+    ingress:
+      enabled: true
+      className: "tailscale"
+
+# Ingestion Worker: Scale-to-Zero on GKE Spot / Preemptible Node Pools
+parsingWorker:
+  enabled: true
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 20
+    pollingInterval: 10
+    cooldownPeriod: 60
+    queueName: "document_parsing_queue"
+    queueLength: "2"
+    tagMatchingQueueName: "tag_matching_queue"
+    tagMatchingQueueLength: "2"
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2048Mi
+    limits:
+      cpu: 4000m
+      memory: 6144Mi
+  nodeSelector:
+    cloud.google.com/gke-spot: "true"
+  tolerations:
+    - key: "cloud.google.com/gke-spot"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+# Embedding Engine: Text Embeddings Inference on GKE Spot Instances
+embeddingEngine:
+  enabled: true
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 10
+    pollingInterval: 10
+    cooldownPeriod: 90
+    queueName: "document_parsing_queue"
+    queueLength: "5"
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 4096Mi
+    limits:
+      cpu: 8000m
+      memory: 8192Mi
+  nodeSelector:
+    cloud.google.com/gke-spot: "true"
+  tolerations:
+    - key: "cloud.google.com/gke-spot"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+# Reranking Engine: BAAI bge-reranker-base on GKE Spot Instances
+rerankingEngine:
+  enabled: true
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 8
+    pollingInterval: 15
+    cooldownPeriod: 90
+    queueName: "reranking_queue"
+    queueLength: "5"
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 4096Mi
+    limits:
+      cpu: 8000m
+      memory: 8192Mi
+  nodeSelector:
+    cloud.google.com/gke-spot: "true"
+  tolerations:
+    - key: "cloud.google.com/gke-spot"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+# Automated Database Migration Pre-Upgrade Hook Job
+databaseMigrate:
+  enabled: true
+  image:
+    repository: viacarraria/database-migrate
+    tag: latest
+  seed: false # Demonstrations seeded manually in production
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+# External Managed Cloud Services (Disabled in-cluster)
+postgresql:
+  enabled: false # Managed Google Cloud SQL for PostgreSQL 16
+
+redis:
+  enabled: false # Managed Google Cloud Memorystore for Redis
+
+minio:
+  enabled: false # Managed Google Cloud Storage (GCS)
+
+# In-Cluster High-Throughput RabbitMQ HA Cluster
+rabbitmq:
+  enabled: true
+  replicaCount: 3
+  persistence:
+    storageClass: "pd-balanced"
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+
+# Vector Database: Weaviate with Persistent Disk SSD Storage
+weaviate:
+  enabled: true
+  anonymousAccess: "false"
+  productQuantization:
+    enabled: true # Compress vector footprint for large-scale production graph search
+  persistence:
+    storageClass: "pd-ssd"
+    size: 50Gi
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4096Mi
+    limits:
+      cpu: 4000m
+      memory: 8192Mi
+
+# Inactive Graph & Cold-Storage Retention Sweeps
+retention:
+  inactivityDays: 90
+  gracePeriodDays: 7
+  scheduleIntervalHours: 24
+  autoPurgeEnabled: true
+  cronJob:
+    enabled: true
+    schedule: "0 3 * * *"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 3
+    image:
+      repository: curlimages/curl
+      tag: "8.12.1"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
