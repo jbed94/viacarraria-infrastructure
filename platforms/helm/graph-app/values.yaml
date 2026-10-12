@@ -221,9 +221,53 @@ backend:
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 75
+  keda:
+    enabled: false
+    minReplicaCount: 2
+    maxReplicaCount: 10
+    pollingInterval: 15
+    cooldownPeriod: 60
+    queueName: "graph_crawl_queue"
+    queueLength: "2"
+  workerRole: "api"
   pdb:
     enabled: false
     minAvailable: 1
+  affinity: {}
+  nodeSelector: {}
+  tolerations: []
+
+# Dedicated Asymmetric Crawl Worker (RabbitMQ consumer, scales 0 to N via KEDA)
+crawlWorker:
+  enabled: true
+  image:
+    repository: viacarraria/backend
+    tag: latest
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 8
+    pollingInterval: 10
+    cooldownPeriod: 60
+    queueName: "graph_crawl_queue"
+    queueLength: "1"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1500m
+      memory: 1536Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
   affinity: {}
   nodeSelector: {}
   tolerations: []
@@ -265,6 +309,22 @@ parsingWorker:
   nodeSelector: {}
   tolerations: []
 
+# Pre-flight Model Synchronizer to MinIO (Zero-Locking Multi-Replica Scaling)
+modelSync:
+  enabled: true
+  image:
+    repository: viacarraria/model-downloader
+    tag: latest
+  bucket: "viacarraria-models"
+  forceSync: false
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2048Mi
+    limits:
+      cpu: 4000m
+      memory: 6144Mi
+
 # Neural Embedding Engine (Hugging Face Text Embeddings Inference / TEI)
 embeddingEngine:
   enabled: true
@@ -272,17 +332,21 @@ embeddingEngine:
     repository: viacarraria/embedding-engine
     tag: latest
   modelId: "sentence-transformers/all-MiniLM-L6-v2"
-  replicaCount: 0
+  replicaCount: 1
+  minioSync:
+    enabled: true
   autoscaling:
     enabled: true
-    minReplicaCount: 0
+    minReplicaCount: 1
     maxReplicaCount: 3
     pollingInterval: 15
     cooldownPeriod: 120
     queueName: "document_parsing_queue"
     queueLength: "1"
+    crawlQueueName: "graph_crawl_queue"
+    crawlQueueLength: "1"
   persistence:
-    enabled: true
+    enabled: false
     storageClass: ""
     accessMode: ReadWriteOnce
     size: 5Gi
@@ -307,16 +371,22 @@ rerankingEngine:
     tag: latest
   modelId: "BAAI/bge-reranker-base"
   replicaCount: 0
+  minioSync:
+    enabled: true
   autoscaling:
     enabled: true
     minReplicaCount: 0
     maxReplicaCount: 3
     pollingInterval: 15
-    cooldownPeriod: 120
+    cooldownPeriod: 60
     queueName: "tag_matching_queue"
     queueLength: "1"
+    crawlQueueName: "graph_crawl_queue"
+    crawlQueueLength: "1"
+    batchRerankQueueName: "batch_rerank_queue"
+    batchRerankQueueLength: "1"
   persistence:
-    enabled: true
+    enabled: false
     storageClass: ""
     accessMode: ReadWriteOnce
     size: 5Gi
@@ -526,3 +596,28 @@ tailscale-operator:
     clientSecret: ""
   apiServerProxyConfig:
     mode: "disabled"
+
+# Karpenter Scale-to-Zero Node Provisioning (EC2 Spot / Inference NodePool)
+karpenter:
+  enabled: false
+  clusterName: "viacarraria-cluster"
+  nodeRole: "KarpenterNodeRole"
+  amiFamily: "AL2023"
+  diskSize: "50Gi"
+  capacityTypes:
+    - "spot"
+    - "on-demand"
+  architectures:
+    - "amd64"
+  instanceCategories:
+    - "c"
+    - "m"
+    - "r"
+  expireAfter: "720h"
+  terminationGracePeriod: "2m"
+  limits:
+    cpu: "32"
+    memory: "64Gi"
+  disruption:
+    consolidationPolicy: "WhenEmpty"
+    consolidateAfter: "30s"

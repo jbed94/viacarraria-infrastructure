@@ -1,0 +1,79 @@
+{{- if and .Values.crawlWorker .Values.crawlWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "graph-app.fullname" . }}-crawl-worker
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crawl-worker
+spec:
+  {{- if not (and .Values.crawlWorker.autoscaling .Values.crawlWorker.autoscaling.enabled) }}
+  replicas: {{ .Values.crawlWorker.replicaCount | default 0 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: crawl-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: crawl-worker
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "graph-app.fullname" . }}-app
+      {{- end }}
+      {{- with .Values.crawlWorker.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.crawlWorker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.crawlWorker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.crawlWorker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: crawl-worker
+          image: "{{ .Values.crawlWorker.image.repository | default .Values.backend.image.repository }}:{{ .Values.crawlWorker.image.tag | default .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          {{- with .Values.crawlWorker.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "graph-app.fullname" . }}-runtime
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.backend.env.nodeEnv | default "production" | quote }}
+            - name: WORKER_ROLE
+              value: "crawl"
+            - name: PORT
+              value: "3001"
+            - name: TEI_URL
+              value: http://{{ include "graph-app.fullname" . }}-embedding-engine:80
+            - name: TEI_RERANK_URL
+              value: http://{{ include "graph-app.fullname" . }}-reranking-engine:80
+            - name: UPLOAD_DIR
+              value: /data/uploads
+          {{- if or .Values.uploads.enabled (eq .Values.storage.driver "local") }}
+          volumeMounts:
+            - name: uploads
+              mountPath: /data/uploads
+          {{- end }}
+          resources:
+            {{- toYaml .Values.crawlWorker.resources | nindent 12 }}
+      {{- if or .Values.uploads.enabled (eq .Values.storage.driver "local") }}
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: {{ include "graph-app.fullname" . }}-uploads
+      {{- end }}
+{{- end }}

@@ -32,7 +32,7 @@ spec:
     {{- end }}
 ---
 {{- end }}
-{{- if .Values.backend.hpa.enabled }}
+{{- if and .Values.backend.hpa.enabled (not (and .Values.backend.keda .Values.backend.keda.enabled)) }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:

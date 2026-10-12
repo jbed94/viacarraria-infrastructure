@@ -56,12 +56,16 @@ spec:
           env:
             - name: NODE_ENV
               value: {{ .Values.backend.env.nodeEnv | default "production" | quote }}
+            - name: WORKER_ROLE
+              value: {{ .Values.backend.workerRole | default "api" | quote }}
             - name: PORT
               value: "3000"
             - name: TEI_URL
               value: http://{{ include "graph-app.fullname" . }}-embedding-engine:80
             - name: TEI_RERANK_URL
               value: http://{{ include "graph-app.fullname" . }}-reranking-engine:80
+            - name: TEI_RERANK_TIMEOUT_MS
+              value: {{ .Values.backend.env.teiRerankTimeoutMs | default "500" | quote }}
             - name: UPLOAD_DIR
               value: /data/uploads
           {{- if or .Values.uploads.enabled (eq .Values.storage.driver "local") }}

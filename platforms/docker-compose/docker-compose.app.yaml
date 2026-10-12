@@ -62,6 +62,7 @@ services:
       WEAVIATE_PQ_SEGMENTS: ${WEAVIATE_PQ_SEGMENTS:-64}
       TEI_URL: http://embedding-engine:80
       TEI_RERANK_URL: ${TEI_RERANK_URL:-http://reranking-engine:80}
+      TEI_RERANK_TIMEOUT_MS: ${TEI_RERANK_TIMEOUT_MS:-500}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
       ADMIN_KEY: ${ADMIN_KEY:-}
@@ -95,6 +96,8 @@ services:
       weaviate:
         condition: service_started
       embedding-engine:
+        condition: service_healthy
+      reranking-engine:
         condition: service_healthy
     healthcheck:
       test: [CMD-SHELL, "node -e \"fetch('http://localhost:3000/api/admin/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))\""]

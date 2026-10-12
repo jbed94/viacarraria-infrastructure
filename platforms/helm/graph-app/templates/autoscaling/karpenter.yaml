@@ -1,0 +1,65 @@
+{{- if and .Values.karpenter .Values.karpenter.enabled }}
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: {{ include "graph-app.fullname" . }}-inference-pool
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  template:
+    metadata:
+      labels:
+        viacarraria.io/workload: inference
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: {{ include "graph-app.fullname" . }}-inference-nodeclass
+      taints:
+        - key: viacarraria.io/workload
+          value: inference
+          effect: NoSchedule
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: {{ .Values.karpenter.capacityTypes | default (list "spot" "on-demand") | toJson }}
+        - key: kubernetes.io/arch
+          operator: In
+          values: {{ .Values.karpenter.architectures | default (list "amd64") | toJson }}
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: {{ .Values.karpenter.instanceCategories | default (list "c" "m" "r") | toJson }}
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["5"]
+      expireAfter: {{ .Values.karpenter.expireAfter | default "720h" | quote }}
+      terminationGracePeriod: {{ .Values.karpenter.terminationGracePeriod | default "2m" | quote }}
+  limits:
+    cpu: {{ .Values.karpenter.limits.cpu | default "32" | quote }}
+    memory: {{ .Values.karpenter.limits.memory | default "64Gi" | quote }}
+  disruption:
+    consolidationPolicy: {{ .Values.karpenter.disruption.consolidationPolicy | default "WhenEmpty" | quote }}
+    consolidateAfter: {{ .Values.karpenter.disruption.consolidateAfter | default "30s" | quote }}
+---
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: {{ include "graph-app.fullname" . }}-inference-nodeclass
+  labels:
+    {{- include "graph-app.labels" . | nindent 4 }}
+spec:
+  amiFamily: {{ .Values.karpenter.amiFamily | default "AL2023" | quote }}
+  role: {{ .Values.karpenter.nodeRole | default "KarpenterNodeRole" | quote }}
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ .Values.karpenter.clusterName | default "viacarraria-cluster" | quote }}
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: {{ .Values.karpenter.clusterName | default "viacarraria-cluster" | quote }}
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: {{ .Values.karpenter.diskSize | default "50Gi" | quote }}
+        volumeType: gp3
+        deleteOnTermination: true
+{{- end }}

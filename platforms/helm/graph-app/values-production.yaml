@@ -211,6 +211,15 @@ backend:
     maxReplicas: 16
     targetCPUUtilizationPercentage: 65
     targetMemoryUtilizationPercentage: 75
+  keda:
+    enabled: false
+    minReplicaCount: 3
+    maxReplicaCount: 16
+    pollingInterval: 10
+    cooldownPeriod: 45
+    queueName: "graph_crawl_queue"
+    queueLength: "2"
+  workerRole: "api"
   pdb:
     enabled: true
     minAvailable: 2
@@ -226,6 +235,42 @@ backend:
                   values:
                     - backend
             topologyKey: "topology.kubernetes.io/zone"
+
+# Dedicated Asymmetric Crawl Worker (RabbitMQ consumer, scales 0 to N via KEDA on GKE Spot)
+crawlWorker:
+  enabled: true
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 16
+    pollingInterval: 10
+    cooldownPeriod: 45
+    queueName: "graph_crawl_queue"
+    queueLength: "1"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2500m
+      memory: 2560Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+  nodeSelector:
+    cloud.google.com/gke-spot: "true"
+  tolerations:
+    - key: "cloud.google.com/gke-spot"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
 
 parsingWorker:
   enabled: true
@@ -267,15 +312,17 @@ parsingWorker:
 embeddingEngine:
   enabled: true
   modelId: "sentence-transformers/all-MiniLM-L6-v2"
-  replicaCount: 0
+  replicaCount: 1
   autoscaling:
     enabled: true
-    minReplicaCount: 0
+    minReplicaCount: 1
     maxReplicaCount: 6
     pollingInterval: 10
     cooldownPeriod: 120
     queueName: "document_parsing_queue"
     queueLength: "1"
+    crawlQueueName: "graph_crawl_queue"
+    crawlQueueLength: "1"
   resources:
     requests:
       cpu: 2000m
@@ -303,6 +350,10 @@ rerankingEngine:
     cooldownPeriod: 60
     queueName: "tag_matching_queue"
     queueLength: "1"
+    crawlQueueName: "graph_crawl_queue"
+    crawlQueueLength: "1"
+    batchRerankQueueName: "batch_rerank_queue"
+    batchRerankQueueLength: "1"
   resources:
     requests:
       cpu: 1500m
@@ -431,4 +482,30 @@ tailscale-operator:
     secretName: "tailscale-oauth-credentials"
   apiServerProxyConfig:
     mode: "disabled"
+
+# Karpenter Scale-to-Zero Node Provisioning (EC2 Spot / Inference NodePool)
+karpenter:
+  enabled: true
+  clusterName: "viacarraria-prod-cluster"
+  nodeRole: "KarpenterNodeRole-viacarraria-prod"
+  amiFamily: "AL2023"
+  diskSize: "100Gi"
+  capacityTypes:
+    - "spot"
+    - "on-demand"
+  architectures:
+    - "amd64"
+  instanceCategories:
+    - "c"
+    - "m"
+    - "r"
+  expireAfter: "720h"
+  terminationGracePeriod: "2m"
+  limits:
+    cpu: "64"
+    memory: "128Gi"
+  disruption:
+    consolidationPolicy: "WhenEmpty"
+    consolidateAfter: "30s"
+
 

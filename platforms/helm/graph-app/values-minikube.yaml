@@ -163,20 +163,41 @@ backend:
   replicaCount: 1
   env:
     nodeEnv: development
+    teiRerankTimeoutMs: "500"
   resources:
     requests:
-      cpu: 150m
-      memory: 256Mi
+      cpu: 200m
+      memory: 512Mi
     limits:
-      cpu: 1000m
-      memory: 768Mi
+      cpu: 1500m
+      memory: 1024Mi
   hpa:
     enabled: true
     minReplicas: 1
     maxReplicas: 6
     targetCPUUtilizationPercentage: 50
+  workerRole: "api"
   pdb:
     enabled: false
+
+crawlWorker:
+  enabled: true
+  replicaCount: 0
+  autoscaling:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 2
+    pollingInterval: 5
+    cooldownPeriod: 20
+    queueName: "graph_crawl_queue"
+    queueLength: "1"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 parsingWorker:
   enabled: true
@@ -199,7 +220,32 @@ parsingWorker:
       cpu: 1000m
       memory: 1536Mi
 
+modelSync:
+  enabled: true
+  forceSync: false
+
 embeddingEngine:
+  enabled: true
+  replicaCount: 1
+  autoscaling:
+    enabled: true
+    minReplicaCount: 1
+    maxReplicaCount: 3
+    pollingInterval: 5
+    cooldownPeriod: 20
+    queueName: "document_parsing_queue"
+    queueLength: "1"
+    crawlQueueName: "graph_crawl_queue"
+    crawlQueueLength: "1"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+
+rerankingEngine:
   enabled: true
   replicaCount: 0
   autoscaling:
@@ -208,27 +254,18 @@ embeddingEngine:
     maxReplicaCount: 3
     pollingInterval: 5
     cooldownPeriod: 20
-    queueName: "document_parsing_queue"
+    queueName: "tag_matching_queue"
     queueLength: "1"
+    crawlQueueName: "graph_crawl_queue"
+    crawlQueueLength: "1"
+    batchRerankQueueName: "batch_rerank_queue"
+    batchRerankQueueLength: "1"
   resources:
     requests:
-      cpu: 300m
-      memory: 512Mi
+      cpu: 1000m
+      memory: 1536Mi
     limits:
-      cpu: 1500m
-      memory: 2048Mi
-
-rerankingEngine:
-  enabled: false # Dense search via embeddingEngine is active; reranker can be enabled on demand
-  replicaCount: 0
-  autoscaling:
-    enabled: false
-  resources:
-    requests:
-      cpu: 300m
-      memory: 1024Mi
-    limits:
-      cpu: 2000m
+      cpu: 3000m
       memory: 4096Mi
 
 databaseMigrate:
@@ -304,11 +341,11 @@ weaviate:
     size: 4Gi
   resources:
     requests:
-      cpu: 200m
+      cpu: 250m
       memory: 512Mi
     limits:
-      cpu: 1000m
-      memory: 1536Mi
+      cpu: 1500m
+      memory: 2048Mi
 
 minio:
   enabled: true
@@ -349,4 +386,10 @@ retention:
       limits:
         cpu: 100m
         memory: 64Mi
+
+# Karpenter is an AWS-native node autoscaler requiring cloud EC2 APIs.
+# Disabled in local Minikube while full KEDA scale-to-zero is active.
+karpenter:
+  enabled: false
+
 

@@ -133,6 +133,39 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if and .Values.embeddingEngine.minioSync .Values.embeddingEngine.minioSync.enabled }}
+      initContainers:
+        - name: sync-model-cache
+          image: "{{ .Values.embeddingEngine.image.repository }}:{{ .Values.embeddingEngine.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              SAFE_MODEL_ID="{{ .Values.embeddingEngine.modelId | default "sentence-transformers/all-MiniLM-L6-v2" | replace "/" "--" }}"
+              if [ ! -d "/data/models--${SAFE_MODEL_ID}/snapshots" ]; then
+                echo "Waiting for model archive ${SAFE_MODEL_ID}.tar in MinIO..."
+                until curl -f -s -I http://{{ include "graph-app.fullname" . }}-minio:9000/{{ .Values.modelSync.bucket | default "viacarraria-models" }}/${SAFE_MODEL_ID}.tar >/dev/null 2>&1; do
+                  echo "Model archive ${SAFE_MODEL_ID}.tar not yet available - retrying in 3s..."
+                  sleep 3
+                done
+                echo "Model archive found. Streaming and extracting to /data..."
+                curl -f -s http://{{ include "graph-app.fullname" . }}-minio:9000/{{ .Values.modelSync.bucket | default "viacarraria-models" }}/${SAFE_MODEL_ID}.tar | tar -xf - -C /data
+                echo "Model extraction complete."
+              else
+                echo "Model ${SAFE_MODEL_ID} already populated in /data."
+              fi
+          volumeMounts:
+            - name: model-cache
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      {{- end }}
       containers:
         - name: embedding-engine
           image: "{{ .Values.embeddingEngine.image.repository }}:{{ .Values.embeddingEngine.image.tag }}"
@@ -154,18 +187,26 @@ spec:
               mountPath: /data
           resources:
             {{- toYaml .Values.embeddingEngine.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /health
               port: 80
-            initialDelaySeconds: 15
+            initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
               port: 80
-            initialDelaySeconds: 30
+            initialDelaySeconds: 10
             periodSeconds: 20
             timeoutSeconds: 5
       volumes:
@@ -255,6 +296,39 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if and .Values.rerankingEngine.minioSync .Values.rerankingEngine.minioSync.enabled }}
+      initContainers:
+        - name: sync-model-cache
+          image: "{{ .Values.rerankingEngine.image.repository }}:{{ .Values.rerankingEngine.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              SAFE_MODEL_ID="{{ .Values.rerankingEngine.modelId | default "BAAI/bge-reranker-base" | replace "/" "--" }}"
+              if [ ! -d "/data/models--${SAFE_MODEL_ID}/snapshots" ]; then
+                echo "Waiting for model archive ${SAFE_MODEL_ID}.tar in MinIO..."
+                until curl -f -s -I http://{{ include "graph-app.fullname" . }}-minio:9000/{{ .Values.modelSync.bucket | default "viacarraria-models" }}/${SAFE_MODEL_ID}.tar >/dev/null 2>&1; do
+                  echo "Model archive ${SAFE_MODEL_ID}.tar not yet available - retrying in 3s..."
+                  sleep 3
+                done
+                echo "Model archive found. Streaming and extracting to /data..."
+                curl -f -s http://{{ include "graph-app.fullname" . }}-minio:9000/{{ .Values.modelSync.bucket | default "viacarraria-models" }}/${SAFE_MODEL_ID}.tar | tar -xf - -C /data
+                echo "Model extraction complete."
+              else
+                echo "Model ${SAFE_MODEL_ID} already populated in /data."
+              fi
+          volumeMounts:
+            - name: model-cache
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      {{- end }}
       containers:
         - name: reranking-engine
           image: "{{ .Values.rerankingEngine.image.repository }}:{{ .Values.rerankingEngine.image.tag }}"
@@ -276,18 +350,26 @@ spec:
               mountPath: /data
           resources:
             {{- toYaml .Values.rerankingEngine.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /health
               port: 80
-            initialDelaySeconds: 15
+            initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
               port: 80
-            initialDelaySeconds: 30
+            initialDelaySeconds: 10
             periodSeconds: 20
             timeoutSeconds: 5
       volumes:
